@@ -1130,7 +1130,7 @@ impl DiskDashboard {
             0.0
         };
 
-        let _frame_response = egui::Frame::default()
+        let frame_response = egui::Frame::default()
             .fill(if is_hovered { hover_fill } else { base_fill })
             .stroke(if is_hovered {
                 if is_empty_folder {
@@ -1144,24 +1144,6 @@ impl DiskDashboard {
             .rounding(6.0)
             .inner_margin(egui::Margin::same(10.0))
             .show(ui, |ui| {
-                // Draw full-width background progress bar
-                if size_ratio > 0.0 {
-                    let row_rect = ui.available_rect_before_wrap();
-                    let bar_height = 24.0;
-                    let bar_rect = egui::Rect::from_min_size(
-                        egui::Pos2::new(row_rect.min.x, row_rect.min.y + (row_rect.height() - bar_height) / 2.0),
-                        egui::Vec2::new(row_rect.width() * size_ratio, bar_height)
-                    );
-                    let bar_color = if size_ratio > 0.8 {
-                        egui::Color32::from_rgba_unmultiplied(255, 80, 80, 40) // Red tint
-                    } else if size_ratio > 0.5 {
-                        egui::Color32::from_rgba_unmultiplied(255, 180, 80, 35) // Orange tint
-                    } else {
-                        egui::Color32::from_rgba_unmultiplied(80, 150, 255, 30) // Blue tint
-                    };
-                    ui.painter().rect_filled(bar_rect, 4.0, bar_color);
-                }
-
                 ui.horizontal(|ui| {
                     // Icon column - different icons for empty vs non-empty folders
                     let icon_size = 18.0;
@@ -1314,6 +1296,24 @@ impl DiskDashboard {
                     });
                 });
             });
+
+        // Draw progress bar overlay on top of the frame
+        if size_ratio > 0.0 {
+            let frame_rect = frame_response.response.rect;
+            let bar_height = frame_rect.height() - 8.0; // Slightly smaller than row
+            let bar_rect = egui::Rect::from_min_size(
+                egui::Pos2::new(frame_rect.min.x + 4.0, frame_rect.min.y + 4.0),
+                egui::Vec2::new((frame_rect.width() - 8.0) * size_ratio, bar_height)
+            );
+            let bar_color = if size_ratio > 0.8 {
+                egui::Color32::from_rgba_unmultiplied(255, 80, 80, 25) // Red tint
+            } else if size_ratio > 0.5 {
+                egui::Color32::from_rgba_unmultiplied(255, 180, 80, 20) // Orange tint
+            } else {
+                egui::Color32::from_rgba_unmultiplied(80, 150, 255, 20) // Blue tint
+            };
+            ui.painter().rect_filled(bar_rect, 4.0, bar_color);
+        }
 
         // Handle click on entire row for directories
         if interact_response.clicked() && item.is_dir {
@@ -1512,7 +1512,6 @@ fn format_size(bytes: u64) -> String {
 }
 
 /// Calculate the total size of a directory (non-recursive, just immediate children)
-#[allow(dead_code)]
 fn calculate_dir_size_shallow(path: &Path) -> u64 {
     fs::read_dir(path)
         .map(|entries| {
@@ -1526,18 +1525,38 @@ fn calculate_dir_size_shallow(path: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-/// Calculate the total size of a directory recursively
+/// Calculate the total size of a directory recursively (with depth limit)
 fn calculate_dir_size_recursive(path: &Path) -> u64 {
+    calculate_dir_size_recursive_limited(path, 2) // Limit to 2 levels to avoid UI freeze
+}
+
+/// Calculate directory size with depth limit to prevent crashes
+fn calculate_dir_size_recursive_limited(path: &Path, max_depth: u32) -> u64 {
+    if max_depth == 0 {
+        // At max depth, just return shallow size
+        return calculate_dir_size_shallow(path);
+    }
+
     let mut total_size: u64 = 0;
 
     if let Ok(entries) = fs::read_dir(path) {
         for entry in entries.flatten() {
             if let Ok(metadata) = entry.metadata() {
                 if metadata.is_file() {
-                    total_size += metadata.len();
+                    total_size = total_size.saturating_add(metadata.len());
                 } else if metadata.is_dir() {
+                    // Skip system folders that might cause issues
+                    let name = entry.file_name();
+                    let name_str = name.to_string_lossy().to_lowercase();
+                    if name_str.starts_with("$") ||
+                       name_str == "system volume information" ||
+                       name_str == "windows" {
+                        continue;
+                    }
                     // Recursively calculate subdirectory size
-                    total_size += calculate_dir_size_recursive(&entry.path());
+                    total_size = total_size.saturating_add(
+                        calculate_dir_size_recursive_limited(&entry.path(), max_depth - 1)
+                    );
                 }
             }
         }
