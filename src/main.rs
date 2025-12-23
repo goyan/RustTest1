@@ -321,12 +321,12 @@ impl eframe::App for DiskDashboard {
                             ui.add_space(10.0);
                             ui.label(egui::RichText::new("To empty the Recycle Bin, right-click it on your Desktop.")
                                 .size(11.0)
-                                .color(egui::Color32::from_gray(150)));
+                                .color(egui::Color32::from_rgb(120, 100, 160)));
 
                             ui.add_space(20.0);
 
                             if ui.add(egui::Button::new("OK")
-                                .fill(egui::Color32::from_rgb(60, 60, 80))
+                                .fill(egui::Color32::from_rgb(40, 25, 60))
                                 .min_size(egui::Vec2::new(100.0, 30.0)))
                                 .clicked()
                             {
@@ -358,7 +358,7 @@ impl eframe::App for DiskDashboard {
                             ui.horizontal(|ui| {
                                 ui.add_space(50.0);
                                 if ui.add(egui::Button::new("Cancel")
-                                    .fill(egui::Color32::from_rgb(60, 60, 80))
+                                    .fill(egui::Color32::from_rgb(40, 25, 60))
                                     .min_size(egui::Vec2::new(80.0, 30.0)))
                                     .clicked()
                                 {
@@ -430,24 +430,25 @@ impl eframe::App for DiskDashboard {
         egui::TopBottomPanel::top("top_panel")
             .show(ctx, |ui| {
                 egui::Frame::default()
-                    .fill(egui::Color32::from_rgb(18, 18, 24))
+                    .fill(egui::Color32::from_rgb(12, 10, 18))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255)))
                     .inner_margin(egui::Margin::same(15.0))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.heading(egui::RichText::new("💾 Disk Dashboard")
+                            ui.heading(egui::RichText::new("⚡ DISK DASHBOARD")
                                 .size(24.0)
-                                .color(egui::Color32::from_rgb(100, 200, 255))
+                                .color(egui::Color32::from_rgb(0, 255, 255))
                                 .strong());
                             ui.add_space(20.0);
-                            ui.label(egui::RichText::new("Real-time disk monitoring & analysis")
+                            ui.label(egui::RichText::new("// SYSTEM ANALYSIS ACTIVE")
                                 .size(12.0)
-                                .color(egui::Color32::from_gray(150)));
-                            
+                                .color(egui::Color32::from_rgb(255, 0, 255)));
+
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if self.current_path.is_some() {
-                                    if ui.add(egui::Button::new("🏠 Home")
-                                        .fill(egui::Color32::from_rgb(60, 60, 80))
-                                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 100, 120))))
+                                    if ui.add(egui::Button::new("⌂ HOME")
+                                        .fill(egui::Color32::from_rgb(30, 20, 50))
+                                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255))))
                                         .clicked() {
                                         self.current_path = None;
                                         self.current_disk = None;
@@ -509,13 +510,13 @@ impl eframe::App for DiskDashboard {
                             .map(|d| d == mount_point)
                             .unwrap_or(false);
                         
-                        // Modern clickable disk card with progress bar
+                        // Cyberpunk disk card with neon colors
                         let usage_color = if percent_clone > 90.0 {
-                            egui::Color32::from_rgb(220, 50, 50)
+                            egui::Color32::from_rgb(255, 51, 102)   // Neon red
                         } else if percent_clone > 75.0 {
-                            egui::Color32::from_rgb(255, 165, 0)
+                            egui::Color32::from_rgb(255, 136, 0)    // Neon orange
                         } else {
-                            egui::Color32::from_rgb(50, 200, 50)
+                            egui::Color32::from_rgb(0, 255, 136)    // Neon green
                         };
 
                         // Create an interactive area to detect hover BEFORE drawing
@@ -641,7 +642,7 @@ impl eframe::App for DiskDashboard {
                                         .color(egui::Color32::from_rgb(100, 200, 255)));
                                     ui.label(egui::RichText::new("Disks")
                                         .size(10.0)
-                                        .color(egui::Color32::from_gray(150)));
+                                        .color(egui::Color32::from_rgb(120, 100, 160)));
                                 });
                                 columns[1].vertical_centered(|ui| {
                                     ui.label(egui::RichText::new(format!("{:.0} GB", total_space as f64 / 1_000_000_000.0))
@@ -650,15 +651,15 @@ impl eframe::App for DiskDashboard {
                                         .color(egui::Color32::from_rgb(100, 200, 255)));
                                     ui.label(egui::RichText::new("Total")
                                         .size(10.0)
-                                        .color(egui::Color32::from_gray(150)));
+                                        .color(egui::Color32::from_rgb(120, 100, 160)));
                                 });
                                 columns[2].vertical_centered(|ui| {
                                     let used_color = if avg_usage > 90.0 {
-                                        egui::Color32::from_rgb(220, 50, 50)
+                                        egui::Color32::from_rgb(255, 51, 102)   // Neon red
                                     } else if avg_usage > 75.0 {
-                                        egui::Color32::from_rgb(255, 165, 0)
+                                        egui::Color32::from_rgb(255, 136, 0)    // Neon orange
                                     } else {
-                                        egui::Color32::from_rgb(50, 200, 50)
+                                        egui::Color32::from_rgb(0, 255, 136)    // Neon green
                                     };
                                     ui.label(egui::RichText::new(format!("{:.1}%", avg_usage))
                                         .size(18.0)
@@ -666,7 +667,7 @@ impl eframe::App for DiskDashboard {
                                         .color(used_color));
                                     ui.label(egui::RichText::new("Used")
                                         .size(10.0)
-                                        .color(egui::Color32::from_gray(150)));
+                                        .color(egui::Color32::from_rgb(120, 100, 160)));
                                 });
                             });
                         });
@@ -692,21 +693,21 @@ impl eframe::App for DiskDashboard {
             }
         });
 
-        // Render toast notification overlay
+        // Render cyberpunk toast notification overlay
         if let Some((ref message, time_left)) = self.toast_message {
             let opacity = (time_left.min(0.3) / 0.3).min(1.0); // Fade out in last 0.3s
             egui::Area::new(egui::Id::new("toast_notification"))
                 .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -50.0])
                 .show(ctx, |ui| {
                     egui::Frame::default()
-                        .fill(egui::Color32::from_rgba_unmultiplied(40, 45, 55, (220.0 * opacity) as u8))
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(100, 120, 150, (200.0 * opacity) as u8)))
+                        .fill(egui::Color32::from_rgba_unmultiplied(20, 10, 35, (230.0 * opacity) as u8))
+                        .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(0, 255, 255, (220.0 * opacity) as u8)))
                         .rounding(8.0)
                         .inner_margin(egui::Margin::symmetric(20.0, 12.0))
                         .show(ui, |ui| {
                             ui.label(egui::RichText::new(message)
                                 .size(14.0)
-                                .color(egui::Color32::from_rgba_unmultiplied(255, 255, 255, (255.0 * opacity) as u8)));
+                                .color(egui::Color32::from_rgba_unmultiplied(0, 255, 255, (255.0 * opacity) as u8)));
                         });
                 });
         }
@@ -723,7 +724,7 @@ impl DiskDashboard {
             ui.add_space(20.0);
             ui.label(egui::RichText::new("Click on a disk in the left panel to explore its contents")
                 .size(14.0)
-                .color(egui::Color32::from_gray(150)));
+                .color(egui::Color32::from_rgb(120, 100, 160)));
         });
     }
 
@@ -796,23 +797,32 @@ impl DiskDashboard {
 
     fn apply_modern_theme(&self, ctx: &egui::Context) {
         let mut style = (*ctx.style()).clone();
-        
-        // Modern color palette
+
+        // Cyberpunk neon color palette
         style.visuals.dark_mode = true;
-        style.visuals.panel_fill = egui::Color32::from_rgb(22, 22, 28);
-        style.visuals.window_fill = egui::Color32::from_rgb(18, 18, 24);
-        style.visuals.extreme_bg_color = egui::Color32::from_rgb(15, 15, 20);
-        style.visuals.faint_bg_color = egui::Color32::from_rgb(30, 30, 40);
-        style.visuals.hyperlink_color = egui::Color32::from_rgb(100, 150, 255);
-        
-        // Button styling
+        style.visuals.panel_fill = egui::Color32::from_rgb(18, 16, 26);       // Dark purple
+        style.visuals.window_fill = egui::Color32::from_rgb(10, 10, 15);      // Deep black
+        style.visuals.extreme_bg_color = egui::Color32::from_rgb(8, 8, 12);   // Darker
+        style.visuals.faint_bg_color = egui::Color32::from_rgb(25, 22, 35);   // Purple tint
+        style.visuals.hyperlink_color = egui::Color32::from_rgb(0, 255, 255); // Neon cyan
+
+        // Neon selection styling
         style.visuals.button_frame = true;
-        style.visuals.selection.bg_fill = egui::Color32::from_rgb(60, 100, 200);
-        
+        style.visuals.selection.bg_fill = egui::Color32::from_rgb(80, 0, 120);  // Purple glow
+        style.visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255));
+
+        // Widget styling with neon accents
+        style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(20, 18, 28);
+        style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 40, 80));
+        style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(30, 25, 45);
+        style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.5, egui::Color32::from_rgb(0, 255, 255));
+        style.visuals.widgets.active.bg_fill = egui::Color32::from_rgb(50, 30, 70);
+        style.visuals.widgets.active.bg_stroke = egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 0, 255));
+
         // Spacing
         style.spacing.item_spacing = egui::Vec2::new(8.0, 6.0);
         style.spacing.window_margin = egui::Margin::same(8.0);
-        
+
         ctx.set_style(style);
     }
 
@@ -1296,10 +1306,10 @@ impl DiskDashboard {
                 } else if self.filtered_items.is_empty() {
                     ui.centered_and_justified(|ui| {
                         if self.search_query.is_empty() {
-                            ui.label(egui::RichText::new("No files found").color(egui::Color32::from_gray(150)));
+                            ui.label(egui::RichText::new("No files found").color(egui::Color32::from_rgb(120, 100, 160)));
                         } else {
                             ui.label(egui::RichText::new(format!("No results for \"{}\"", self.search_query))
-                                .color(egui::Color32::from_gray(150)));
+                                .color(egui::Color32::from_rgb(120, 100, 160)));
                         }
                     });
                 } else {
@@ -1323,21 +1333,21 @@ impl DiskDashboard {
         };
 
         let category_color = match item.category {
-            FileCategory::MustKeep => egui::Color32::from_rgb(50, 200, 50),
-            FileCategory::System => egui::Color32::from_rgb(100, 150, 255),
-            FileCategory::Regular => egui::Color32::from_rgb(200, 200, 200),
-            FileCategory::Useless => egui::Color32::from_rgb(255, 100, 100),
-            FileCategory::Unknown => egui::Color32::from_gray(150),
+            FileCategory::MustKeep => egui::Color32::from_rgb(0, 255, 136),   // Neon green
+            FileCategory::System => egui::Color32::from_rgb(170, 85, 255),    // Neon purple
+            FileCategory::Regular => egui::Color32::from_rgb(0, 212, 255),    // Electric blue
+            FileCategory::Useless => egui::Color32::from_rgb(255, 51, 102),   // Neon red
+            FileCategory::Unknown => egui::Color32::from_rgb(100, 80, 140),   // Dim purple
         };
 
         let usefulness_color = if item.usefulness < 20.0 {
-            egui::Color32::from_rgb(255, 100, 100) // Red - low usefulness
+            egui::Color32::from_rgb(255, 51, 102)  // Neon red
         } else if item.usefulness < 50.0 {
-            egui::Color32::from_rgb(255, 165, 0) // Orange
+            egui::Color32::from_rgb(255, 136, 0)   // Neon orange
         } else if item.usefulness < 80.0 {
-            egui::Color32::from_rgb(255, 255, 100) // Yellow
+            egui::Color32::from_rgb(0, 255, 255)   // Neon cyan
         } else {
-            egui::Color32::from_rgb(100, 255, 100) // Green - high usefulness
+            egui::Color32::from_rgb(0, 255, 136)   // Neon green
         };
 
         let is_calculating = self.pending_size_calculations.contains(&item.path);
@@ -1374,22 +1384,22 @@ impl DiskDashboard {
         let interact_response = ui.interact(interact_rect, item_id, sense);
         let is_hovered = interact_response.hovered();
 
-        // Modern clean file item design with proper hover and selection
-        // Selected items get blue tint, empty folders get muted appearance
+        // Cyberpunk neon file item design
+        // Selected items get magenta glow, empty folders get muted appearance
         let base_fill = if is_selected {
-            egui::Color32::from_rgb(40, 60, 90) // Blue tint for selected
+            egui::Color32::from_rgb(60, 20, 80)  // Purple glow for selected
         } else if is_empty_folder {
-            egui::Color32::from_rgb(22, 24, 28) // Darker for empty
+            egui::Color32::from_rgb(15, 12, 20) // Darker for empty
         } else {
-            egui::Color32::from_rgb(25, 27, 32)
+            egui::Color32::from_rgb(18, 16, 26)  // Dark purple base
         };
 
         let hover_fill = if is_selected {
-            egui::Color32::from_rgb(50, 75, 110) // Brighter blue for selected+hover
+            egui::Color32::from_rgb(80, 30, 100) // Brighter purple for selected+hover
         } else if is_empty_folder {
-            egui::Color32::from_rgb(35, 38, 45) // Less bright hover for empty
+            egui::Color32::from_rgb(25, 20, 35)  // Dim purple hover for empty
         } else {
-            egui::Color32::from_rgb(40, 45, 58)
+            egui::Color32::from_rgb(30, 25, 45)  // Purple hover
         };
 
         // Calculate size ratio for background progress bar
@@ -1403,12 +1413,16 @@ impl DiskDashboard {
             .fill(if is_hovered { hover_fill } else { base_fill })
             .stroke(if is_hovered {
                 if is_empty_folder {
-                    egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 90)) // Gray for empty
+                    egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 40, 80))  // Dim purple for empty
+                } else if is_selected {
+                    egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 0, 255)) // Magenta for selected
                 } else {
-                    egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 120, 180))
+                    egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 255)) // Cyan hover
                 }
+            } else if is_selected {
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 0, 180)) // Dim magenta for selected
             } else {
-                egui::Stroke::new(1.0, egui::Color32::from_rgb(35, 38, 45))
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 30, 60))  // Dark purple border
             })
             .rounding(6.0)
             .inner_margin(egui::Margin::same(10.0))
@@ -1459,15 +1473,15 @@ impl DiskDashboard {
                     ui.label(egui::RichText::new(icon_text).size(icon_size));
                     ui.add_space(12.0);
                     
-                    // Name column - different colors for empty folders
+                    // Name column - neon colors for cyberpunk theme
                     let name_color = if item.is_dir {
                         if is_empty_folder {
-                            egui::Color32::from_rgb(120, 140, 160) // Dimmer for empty
+                            egui::Color32::from_rgb(80, 60, 100)   // Dim purple for empty
                         } else {
-                            egui::Color32::from_rgb(150, 200, 255) // Bright for non-empty
+                            egui::Color32::from_rgb(0, 255, 255)   // Neon cyan for folders
                         }
                     } else {
-                        egui::Color32::from_rgb(220, 220, 220)
+                        egui::Color32::from_rgb(200, 180, 255)     // Light purple for files
                     };
 
                     // Use regular label instead of selectable_label to avoid conflicting hover styles
@@ -1614,11 +1628,11 @@ impl DiskDashboard {
                 egui::Vec2::new((frame_rect.width() - 8.0) * size_ratio, bar_height)
             );
             let bar_color = if size_ratio > 0.8 {
-                egui::Color32::from_rgba_unmultiplied(255, 80, 80, 25) // Red tint
+                egui::Color32::from_rgba_unmultiplied(255, 51, 102, 40)  // Neon red glow
             } else if size_ratio > 0.5 {
-                egui::Color32::from_rgba_unmultiplied(255, 180, 80, 20) // Orange tint
+                egui::Color32::from_rgba_unmultiplied(255, 136, 0, 35)   // Neon orange glow
             } else {
-                egui::Color32::from_rgba_unmultiplied(80, 150, 255, 20) // Blue tint
+                egui::Color32::from_rgba_unmultiplied(0, 255, 255, 30)   // Neon cyan glow
             };
             ui.painter().rect_filled(bar_rect, 4.0, bar_color);
         }
@@ -1783,13 +1797,13 @@ impl DiskDashboard {
                 // Draw pie slices
                 let mut current_angle = -std::f64::consts::PI / 2.0; // Start from top
                 
-                // Used space (red/orange/green based on usage)
+                // Used space (neon colors based on usage)
                 let used_color = if avg_usage > 90.0 {
-                    egui::Color32::from_rgb(220, 50, 50)
+                    egui::Color32::from_rgb(255, 51, 102)   // Neon red
                 } else if avg_usage > 75.0 {
-                    egui::Color32::from_rgb(255, 165, 0)
+                    egui::Color32::from_rgb(255, 136, 0)    // Neon orange
                 } else {
-                    egui::Color32::from_rgb(100, 200, 100)
+                    egui::Color32::from_rgb(0, 255, 136)    // Neon green
                 };
                 
                 if used_angle > 0.0 {
