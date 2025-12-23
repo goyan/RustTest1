@@ -278,6 +278,7 @@ impl eframe::App for DiskDashboard {
 
             // Check if this is a protected system folder/file
             let name_lower = file_name.to_lowercase();
+            let path_lower = path_to_delete.to_string_lossy().to_lowercase();
             let is_protected = name_lower.starts_with("$") ||
                 name_lower == "system volume information" ||
                 name_lower == "recovery" ||
@@ -285,8 +286,9 @@ impl eframe::App for DiskDashboard {
                 name_lower == "bootmgr" ||
                 name_lower == "pagefile.sys" ||
                 name_lower == "hiberfil.sys" ||
-                path_to_delete.to_string_lossy().to_lowercase().contains("windows\\system32") ||
-                path_to_delete.to_string_lossy().to_lowercase().contains("program files");
+                path_lower.contains("\\windows\\") ||  // Anything inside Windows folder
+                path_lower.ends_with("\\windows") ||   // Windows folder itself
+                path_lower.contains("program files");
 
             egui::Window::new(if is_protected { "Protected Item" } else { "Confirm Delete" })
                 .collapsible(false)
@@ -1225,10 +1227,29 @@ impl DiskDashboard {
                             .fill(egui::Color32::from_rgb(150, 50, 50)))
                             .clicked()
                         {
-                            // Delete all selected items
+                            // Delete all selected items (skip protected)
                             let mut deleted = 0;
+                            let mut skipped = 0;
                             let mut errors = Vec::new();
                             for path in self.selected_items.clone() {
+                                // Check if protected
+                                let path_lower = path.to_string_lossy().to_lowercase();
+                                let name_lower = path.file_name()
+                                    .map(|n| n.to_string_lossy().to_lowercase())
+                                    .unwrap_or_default();
+                                let is_protected = name_lower.starts_with("$") ||
+                                    name_lower == "system volume information" ||
+                                    name_lower == "recovery" ||
+                                    name_lower == "boot" ||
+                                    path_lower.contains("\\windows\\") ||
+                                    path_lower.ends_with("\\windows") ||
+                                    path_lower.contains("program files");
+
+                                if is_protected {
+                                    skipped += 1;
+                                    continue;
+                                }
+
                                 let result = if path.is_dir() {
                                     fs::remove_dir_all(&path)
                                 } else {
@@ -1250,8 +1271,10 @@ impl DiskDashboard {
                             }
                             self.selected_items.clear();
                             self.needs_refresh = true;
-                            if errors.is_empty() {
+                            if errors.is_empty() && skipped == 0 {
                                 self.toast_message = Some((format!("🗑️ Deleted {} items", deleted), 2.0));
+                            } else if skipped > 0 {
+                                self.toast_message = Some((format!("🔒 Skipped {} protected, deleted {}", skipped, deleted), 3.0));
                             } else {
                                 self.toast_message = Some((format!("⚠️ Deleted {} items, {} failed", deleted, errors.len()), 3.0));
                             }
