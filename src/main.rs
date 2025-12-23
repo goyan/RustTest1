@@ -1885,14 +1885,21 @@ impl DiskDashboard {
 }
 
 fn format_size(bytes: u64) -> String {
-    if bytes < 1024 {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * 1024;
+    const GB: u64 = 1024 * 1024 * 1024;
+    const TB: u64 = 1024 * 1024 * 1024 * 1024;
+
+    if bytes < KB {
         format!("{} B", bytes)
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else if bytes < 1024 * 1024 * 1024 {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else if bytes < MB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else if bytes < GB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes < TB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
     } else {
-        format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+        format!("{:.2} TB", bytes as f64 / TB as f64)
     }
 }
 
@@ -1956,7 +1963,7 @@ fn should_block_folder_entry(child_count: Option<usize>) -> bool {
     child_count == Some(0)
 }
 
-/// Check if a path is a protected system path
+/// Check if a path is a protected system path (name only)
 #[allow(dead_code)] // Used in tests
 fn is_protected_path(name: &str) -> bool {
     let name_lower = name.to_lowercase();
@@ -1967,6 +1974,253 @@ fn is_protected_path(name: &str) -> bool {
     name_lower == "bootmgr" ||
     name_lower == "pagefile.sys" ||
     name_lower == "hiberfil.sys"
+}
+
+/// Check if a full path is protected (includes Windows folder and Program Files)
+#[allow(dead_code)] // Used in tests
+fn is_protected_full_path(path: &str) -> bool {
+    let path_lower = path.to_lowercase();
+    let name = std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.to_lowercase())
+        .unwrap_or_default();
+
+    name.starts_with("$") ||
+    name == "system volume information" ||
+    name == "recovery" ||
+    name == "boot" ||
+    name == "bootmgr" ||
+    name == "pagefile.sys" ||
+    name == "hiberfil.sys" ||
+    path_lower.contains("\\windows\\") ||
+    path_lower.ends_with("\\windows") ||
+    path_lower.contains("program files")
+}
+
+/// Categorize a file based on its path, name, type, and size
+/// Returns (FileCategory, usefulness_score)
+#[allow(dead_code)] // Used in tests
+fn categorize_file(path: &str, name: &str, is_dir: bool, size: u64) -> (FileCategory, f32) {
+    let name_lower = name.to_lowercase();
+    let path_lower = path.to_lowercase();
+
+    // System and critical files - NEVER delete these
+    if path_lower.contains("windows\\system32") ||
+       path_lower.contains("windows\\syswow64") ||
+       path_lower.contains("program files") ||
+       path_lower.contains("programdata") ||
+       name_lower == "windows" ||
+       name_lower == "boot" ||
+       name_lower == "bootmgr" ||
+       name_lower == "pagefile.sys" ||
+       name_lower == "hiberfil.sys" ||
+       name_lower == "$recycle.bin" ||
+       name_lower == "system volume information" ||
+       name_lower == "recovery" ||
+       name_lower.starts_with("$") {
+        return (FileCategory::MustKeep, 100.0);
+    }
+
+    // Temp files and cache - useless (safe to delete)
+    if name_lower.contains("temp") ||
+       name_lower.contains("cache") ||
+       name_lower.contains("tmp") ||
+       name_lower.ends_with(".tmp") ||
+       name_lower.ends_with(".log") ||
+       path_lower.contains("\\temp\\") ||
+       path_lower.contains("\\cache\\") ||
+       path_lower.contains("\\tmp\\") ||
+       name_lower.starts_with("~$") {
+        return (FileCategory::Useless, 5.0);
+    }
+
+    // System files
+    if name_lower.ends_with(".sys") ||
+       name_lower.ends_with(".dll") ||
+       name_lower.ends_with(".exe") && path_lower.contains("windows") ||
+       name_lower.ends_with(".inf") ||
+       name_lower.ends_with(".cat") {
+        return (FileCategory::System, 85.0);
+    }
+
+    // Get file extension
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+
+    // Important user data - high usefulness
+    let important_extensions = ["doc", "docx", "xls", "xlsx", "ppt", "pptx", "pdf",
+                                "txt", "md", "rtf", "odt", "ods", "odp"];
+    if important_extensions.contains(&ext.as_str()) {
+        return (FileCategory::Regular, 90.0);
+    }
+
+    // Photos - very important to users
+    let photo_extensions = ["jpg", "jpeg", "png", "gif", "bmp", "webp", "raw", "cr2", "nef", "arw"];
+    if photo_extensions.contains(&ext.as_str()) {
+        return (FileCategory::Regular, 95.0);
+    }
+
+    // Videos - important but large
+    let video_extensions = ["mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "m4v"];
+    if video_extensions.contains(&ext.as_str()) {
+        let usefulness = if size > 1_000_000_000 { 70.0 } else { 85.0 };
+        return (FileCategory::Regular, usefulness);
+    }
+
+    // Audio - important
+    let audio_extensions = ["mp3", "wav", "flac", "ogg", "aac", "m4a", "wma"];
+    if audio_extensions.contains(&ext.as_str()) {
+        return (FileCategory::Regular, 80.0);
+    }
+
+    // Code and projects - important for developers
+    let code_extensions = ["rs", "py", "js", "ts", "java", "c", "cpp", "h", "cs", "go",
+                          "html", "css", "json", "xml", "yaml", "toml", "sql"];
+    if code_extensions.contains(&ext.as_str()) {
+        return (FileCategory::Regular, 85.0);
+    }
+
+    // Archives - depends on size
+    let archive_extensions = ["zip", "rar", "7z", "tar", "gz", "bz2"];
+    if archive_extensions.contains(&ext.as_str()) {
+        let usefulness = if size > 1_000_000_000 { 30.0 }
+                        else if size > 100_000_000 { 45.0 }
+                        else { 55.0 };
+        return (FileCategory::Regular, usefulness);
+    }
+
+    // ISOs and disk images - usually can be deleted
+    if ext == "iso" || ext == "dmg" || ext == "img" {
+        return (FileCategory::Regular, 25.0);
+    }
+
+    // Executables and installers
+    let installer_extensions = ["exe", "msi", "bat", "cmd", "ps1"];
+    if installer_extensions.contains(&ext.as_str()) {
+        if path_lower.contains("downloads") {
+            return (FileCategory::Regular, 35.0);
+        }
+        return (FileCategory::Regular, 60.0);
+    }
+
+    // Old backup files
+    if name_lower.ends_with(".bak") || name_lower.ends_with(".old") || name_lower.contains("backup") {
+        return (FileCategory::Regular, 40.0);
+    }
+
+    // Folders
+    if is_dir {
+        if name_lower == "node_modules" || name_lower == "target" ||
+           name_lower == "build" || name_lower == "dist" || name_lower == ".git" {
+            return (FileCategory::Regular, 30.0);
+        }
+        if name_lower == "documents" || name_lower == "pictures" ||
+           name_lower == "music" || name_lower == "videos" {
+            return (FileCategory::Regular, 95.0);
+        }
+        if name_lower == "downloads" {
+            return (FileCategory::Regular, 50.0);
+        }
+        return (FileCategory::Regular, 65.0);
+    }
+
+    // Default for unknown files
+    let usefulness = if size > 500_000_000 { 45.0 }
+                    else if size > 100_000_000 { 55.0 }
+                    else { 60.0 };
+    (FileCategory::Regular, usefulness)
+}
+
+/// Get the icon for a file based on its extension and category
+#[allow(dead_code)] // Used in tests
+fn get_file_icon(name: &str, is_dir: bool, is_empty_folder: bool, category: FileCategory) -> &'static str {
+    if is_dir {
+        return if is_empty_folder { "📂" } else { "📁" };
+    }
+
+    let ext = std::path::Path::new(name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+
+    match ext.as_str() {
+        // Images
+        "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "svg" | "ico" => "🖼️",
+        // Videos
+        "mp4" | "avi" | "mkv" | "mov" | "wmv" | "flv" | "webm" => "🎬",
+        // Audio
+        "mp3" | "wav" | "flac" | "ogg" | "aac" | "m4a" => "🎵",
+        // Documents
+        "pdf" => "📕",
+        "doc" | "docx" => "📘",
+        "xls" | "xlsx" => "📗",
+        "ppt" | "pptx" => "📙",
+        "txt" | "md" | "rtf" => "📝",
+        // Code
+        "rs" | "py" | "js" | "ts" | "java" | "c" | "cpp" | "h" | "cs" | "go" => "💻",
+        "html" | "css" | "json" | "xml" | "yaml" | "toml" => "🌐",
+        // Archives
+        "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" => "📦",
+        // Executables
+        "exe" | "msi" | "bat" | "cmd" | "ps1" | "sh" => "⚡",
+        // Default by category
+        _ => match category {
+            FileCategory::MustKeep => "🔒",
+            FileCategory::System => "⚙️",
+            FileCategory::Regular => "📄",
+            FileCategory::Useless => "🗑️",
+            FileCategory::Unknown => "❓",
+        }
+    }
+}
+
+/// Sort comparison for file items
+#[allow(dead_code)] // Used in tests
+fn compare_file_items(a: &FileItem, b: &FileItem, sort_column: SortColumn, ascending: bool) -> std::cmp::Ordering {
+    // Directories always first
+    match (a.is_dir, b.is_dir) {
+        (true, false) => return std::cmp::Ordering::Less,
+        (false, true) => return std::cmp::Ordering::Greater,
+        _ => {}
+    }
+
+    let ordering = match sort_column {
+        SortColumn::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        SortColumn::Size => a.size.cmp(&b.size),
+        SortColumn::Category => {
+            let cat_order = |c: &FileCategory| -> u8 {
+                match c {
+                    FileCategory::MustKeep => 0,
+                    FileCategory::System => 1,
+                    FileCategory::Regular => 2,
+                    FileCategory::Useless => 3,
+                    FileCategory::Unknown => 4,
+                }
+            };
+            cat_order(&a.category).cmp(&cat_order(&b.category))
+        }
+        SortColumn::Usefulness => a.usefulness.partial_cmp(&b.usefulness).unwrap_or(std::cmp::Ordering::Equal),
+    };
+
+    if ascending { ordering } else { ordering.reverse() }
+}
+
+/// Filter items by search query
+#[allow(dead_code)] // Used in tests
+fn filter_items(items: &[FileItem], query: &str) -> Vec<FileItem> {
+    if query.is_empty() {
+        return items.to_vec();
+    }
+    let query_lower = query.to_lowercase();
+    items.iter()
+        .filter(|item| item.name.to_lowercase().contains(&query_lower))
+        .cloned()
+        .collect()
 }
 
 #[cfg(test)]
@@ -2001,17 +2255,21 @@ mod tests {
         assert_eq!(format_size(1024 * 1024 * 1024 * 2), "2.00 GB");
     }
 
+    #[test]
+    fn test_format_size_terabytes() {
+        assert_eq!(format_size(1024u64 * 1024 * 1024 * 1024), "1.00 TB");
+        assert_eq!(format_size(1024u64 * 1024 * 1024 * 1024 * 5), "5.00 TB");
+    }
+
     // ==================== Empty Folder Navigation Tests ====================
 
     #[test]
     fn test_empty_folder_blocks_navigation() {
-        // Empty folder (0 items) should block
         assert!(should_block_folder_entry(Some(0)));
     }
 
     #[test]
     fn test_non_empty_folder_allows_navigation() {
-        // Non-empty folders should allow navigation
         assert!(!should_block_folder_entry(Some(1)));
         assert!(!should_block_folder_entry(Some(10)));
         assert!(!should_block_folder_entry(Some(100)));
@@ -2019,11 +2277,10 @@ mod tests {
 
     #[test]
     fn test_unknown_folder_count_allows_navigation() {
-        // If count is unknown, allow navigation (fail open)
         assert!(!should_block_folder_entry(None));
     }
 
-    // ==================== Protected Path Tests ====================
+    // ==================== Protected Path Tests (Name Only) ====================
 
     #[test]
     fn test_recycle_bin_is_protected() {
@@ -2044,6 +2301,7 @@ mod tests {
         assert!(is_protected_path("hiberfil.sys"));
         assert!(is_protected_path("bootmgr"));
         assert!(is_protected_path("Recovery"));
+        assert!(is_protected_path("boot"));
     }
 
     #[test]
@@ -2054,19 +2312,456 @@ mod tests {
     }
 
     #[test]
-    fn test_normal_folders_not_protected() {
+    fn test_normal_folders_not_protected_by_name() {
         assert!(!is_protected_path("Documents"));
         assert!(!is_protected_path("Users"));
-        assert!(!is_protected_path("Program Files"));
         assert!(!is_protected_path("my_project"));
     }
 
-    // ==================== File Category Tests ====================
+    // ==================== Protected Full Path Tests ====================
+
+    #[test]
+    fn test_windows_folder_is_protected() {
+        assert!(is_protected_full_path("C:\\Windows"));
+        assert!(is_protected_full_path("C:\\WINDOWS"));
+        assert!(is_protected_full_path("c:\\windows"));
+    }
+
+    #[test]
+    fn test_windows_subfolder_is_protected() {
+        assert!(is_protected_full_path("C:\\Windows\\System32"));
+        assert!(is_protected_full_path("C:\\Windows\\Panther"));
+        assert!(is_protected_full_path("C:\\Windows\\Fonts"));
+        assert!(is_protected_full_path("C:\\Windows\\SysWOW64\\file.dll"));
+    }
+
+    #[test]
+    fn test_program_files_is_protected() {
+        assert!(is_protected_full_path("C:\\Program Files\\App"));
+        assert!(is_protected_full_path("C:\\Program Files (x86)\\App"));
+        assert!(is_protected_full_path("D:\\Program Files\\Something"));
+    }
+
+    #[test]
+    fn test_user_folders_not_protected() {
+        assert!(!is_protected_full_path("C:\\Users\\John\\Documents"));
+        assert!(!is_protected_full_path("D:\\Projects\\myapp"));
+        assert!(!is_protected_full_path("C:\\Data\\file.txt"));
+    }
+
+    // ==================== File Categorization Tests ====================
+
+    #[test]
+    fn test_categorize_system_files_mustkeep() {
+        let (cat, score) = categorize_file("C:\\Windows\\System32\\kernel32.dll", "kernel32.dll", false, 1000);
+        assert!(matches!(cat, FileCategory::MustKeep));
+        assert_eq!(score, 100.0);
+
+        let (cat, _) = categorize_file("C:\\pagefile.sys", "pagefile.sys", false, 1000);
+        assert!(matches!(cat, FileCategory::MustKeep));
+    }
+
+    #[test]
+    fn test_categorize_recycle_bin_mustkeep() {
+        let (cat, score) = categorize_file("C:\\$RECYCLE.BIN", "$RECYCLE.BIN", true, 0);
+        assert!(matches!(cat, FileCategory::MustKeep));
+        assert_eq!(score, 100.0);
+    }
+
+    #[test]
+    fn test_categorize_temp_files_useless() {
+        let (cat, score) = categorize_file("C:\\temp\\file.tmp", "file.tmp", false, 100);
+        assert!(matches!(cat, FileCategory::Useless));
+        assert_eq!(score, 5.0);
+
+        let (cat, _) = categorize_file("C:\\Users\\cache\\data", "cache", true, 0);
+        assert!(matches!(cat, FileCategory::Useless));
+
+        let (cat, _) = categorize_file("C:\\app.log", "app.log", false, 1000);
+        assert!(matches!(cat, FileCategory::Useless));
+    }
+
+    #[test]
+    fn test_categorize_system_dll_files() {
+        let (cat, score) = categorize_file("C:\\app\\lib.dll", "lib.dll", false, 1000);
+        assert!(matches!(cat, FileCategory::System));
+        assert_eq!(score, 85.0);
+    }
+
+    #[test]
+    fn test_categorize_photos_high_usefulness() {
+        let (cat, score) = categorize_file("C:\\Photos\\vacation.jpg", "vacation.jpg", false, 5000000);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 95.0);
+
+        let (cat, score) = categorize_file("C:\\Photos\\image.png", "image.png", false, 1000);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 95.0);
+    }
+
+    #[test]
+    fn test_categorize_documents_high_usefulness() {
+        let (cat, score) = categorize_file("C:\\Docs\\report.pdf", "report.pdf", false, 1000);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 90.0);
+
+        let (cat, score) = categorize_file("C:\\Docs\\letter.docx", "letter.docx", false, 1000);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 90.0);
+    }
+
+    #[test]
+    fn test_categorize_videos_size_dependent() {
+        // Small video - high usefulness
+        let (cat, score) = categorize_file("C:\\Videos\\clip.mp4", "clip.mp4", false, 100_000_000);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 85.0);
+
+        // Large video - lower usefulness
+        let (cat, score) = categorize_file("C:\\Videos\\movie.mp4", "movie.mp4", false, 5_000_000_000);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 70.0);
+    }
+
+    #[test]
+    fn test_categorize_code_files() {
+        let (cat, score) = categorize_file("C:\\Projects\\main.rs", "main.rs", false, 5000);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 85.0);
+
+        let (cat, score) = categorize_file("C:\\Projects\\app.py", "app.py", false, 1000);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 85.0);
+    }
+
+    #[test]
+    fn test_categorize_archives_size_dependent() {
+        // Small archive
+        let (cat, score) = categorize_file("C:\\Downloads\\file.zip", "file.zip", false, 10_000_000);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 55.0);
+
+        // Large archive
+        let (cat, score) = categorize_file("C:\\Downloads\\huge.zip", "huge.zip", false, 2_000_000_000);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 30.0);
+    }
+
+    #[test]
+    fn test_categorize_iso_low_usefulness() {
+        let (cat, score) = categorize_file("C:\\Downloads\\windows.iso", "windows.iso", false, 5_000_000_000);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 25.0);
+    }
+
+    #[test]
+    fn test_categorize_executables_in_downloads() {
+        let (cat, score) = categorize_file("C:\\Downloads\\installer.exe", "installer.exe", false, 100_000_000);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 35.0);
+    }
+
+    #[test]
+    fn test_categorize_backup_files() {
+        let (cat, score) = categorize_file("C:\\data.bak", "data.bak", false, 1000);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 40.0);
+
+        let (cat, score) = categorize_file("C:\\backup_2024", "backup_2024", true, 0);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 40.0);
+    }
+
+    #[test]
+    fn test_categorize_special_folders() {
+        // node_modules - low usefulness
+        let (cat, score) = categorize_file("C:\\project\\node_modules", "node_modules", true, 0);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 30.0);
+
+        // Documents folder - high usefulness
+        let (cat, score) = categorize_file("C:\\Users\\John\\Documents", "Documents", true, 0);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 95.0);
+
+        // Downloads - medium
+        let (cat, score) = categorize_file("C:\\Users\\John\\Downloads", "Downloads", true, 0);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 50.0);
+    }
+
+    // ==================== File Icon Tests ====================
+
+    #[test]
+    fn test_folder_icons() {
+        assert_eq!(get_file_icon("folder", true, false, FileCategory::Regular), "📁");
+        assert_eq!(get_file_icon("empty", true, true, FileCategory::Regular), "📂");
+    }
+
+    #[test]
+    fn test_image_icons() {
+        assert_eq!(get_file_icon("photo.jpg", false, false, FileCategory::Regular), "🖼️");
+        assert_eq!(get_file_icon("image.png", false, false, FileCategory::Regular), "🖼️");
+        assert_eq!(get_file_icon("icon.ico", false, false, FileCategory::Regular), "🖼️");
+    }
+
+    #[test]
+    fn test_video_icons() {
+        assert_eq!(get_file_icon("movie.mp4", false, false, FileCategory::Regular), "🎬");
+        assert_eq!(get_file_icon("clip.mkv", false, false, FileCategory::Regular), "🎬");
+    }
+
+    #[test]
+    fn test_audio_icons() {
+        assert_eq!(get_file_icon("song.mp3", false, false, FileCategory::Regular), "🎵");
+        assert_eq!(get_file_icon("audio.wav", false, false, FileCategory::Regular), "🎵");
+    }
+
+    #[test]
+    fn test_document_icons() {
+        assert_eq!(get_file_icon("doc.pdf", false, false, FileCategory::Regular), "📕");
+        assert_eq!(get_file_icon("doc.docx", false, false, FileCategory::Regular), "📘");
+        assert_eq!(get_file_icon("data.xlsx", false, false, FileCategory::Regular), "📗");
+        assert_eq!(get_file_icon("slides.pptx", false, false, FileCategory::Regular), "📙");
+        assert_eq!(get_file_icon("notes.txt", false, false, FileCategory::Regular), "📝");
+    }
+
+    #[test]
+    fn test_code_icons() {
+        assert_eq!(get_file_icon("main.rs", false, false, FileCategory::Regular), "💻");
+        assert_eq!(get_file_icon("app.py", false, false, FileCategory::Regular), "💻");
+        assert_eq!(get_file_icon("index.html", false, false, FileCategory::Regular), "🌐");
+        assert_eq!(get_file_icon("config.json", false, false, FileCategory::Regular), "🌐");
+    }
+
+    #[test]
+    fn test_archive_icons() {
+        assert_eq!(get_file_icon("files.zip", false, false, FileCategory::Regular), "📦");
+        assert_eq!(get_file_icon("backup.7z", false, false, FileCategory::Regular), "📦");
+    }
+
+    #[test]
+    fn test_executable_icons() {
+        assert_eq!(get_file_icon("app.exe", false, false, FileCategory::Regular), "⚡");
+        assert_eq!(get_file_icon("script.bat", false, false, FileCategory::Regular), "⚡");
+    }
+
+    #[test]
+    fn test_category_fallback_icons() {
+        assert_eq!(get_file_icon("unknown.xyz", false, false, FileCategory::MustKeep), "🔒");
+        assert_eq!(get_file_icon("driver.sys", false, false, FileCategory::System), "⚙️");
+        assert_eq!(get_file_icon("file.dat", false, false, FileCategory::Regular), "📄");
+        assert_eq!(get_file_icon("cache.dat", false, false, FileCategory::Useless), "🗑️");
+    }
+
+    // ==================== Sorting Tests ====================
+
+    fn create_test_item(name: &str, size: u64, is_dir: bool, category: FileCategory, usefulness: f32) -> FileItem {
+        FileItem {
+            path: PathBuf::from(format!("C:\\{}", name)),
+            name: name.to_string(),
+            size,
+            is_dir,
+            category,
+            usefulness,
+            modified: None,
+            child_count: None,
+        }
+    }
+
+    #[test]
+    fn test_sort_directories_first() {
+        let dir = create_test_item("folder", 0, true, FileCategory::Regular, 50.0);
+        let file = create_test_item("file.txt", 1000, false, FileCategory::Regular, 50.0);
+
+        let result = compare_file_items(&dir, &file, SortColumn::Name, true);
+        assert_eq!(result, std::cmp::Ordering::Less);
+
+        let result = compare_file_items(&file, &dir, SortColumn::Name, true);
+        assert_eq!(result, std::cmp::Ordering::Greater);
+    }
+
+    #[test]
+    fn test_sort_by_name_ascending() {
+        let a = create_test_item("apple", 100, false, FileCategory::Regular, 50.0);
+        let b = create_test_item("banana", 100, false, FileCategory::Regular, 50.0);
+
+        let result = compare_file_items(&a, &b, SortColumn::Name, true);
+        assert_eq!(result, std::cmp::Ordering::Less);
+    }
+
+    #[test]
+    fn test_sort_by_name_descending() {
+        let a = create_test_item("apple", 100, false, FileCategory::Regular, 50.0);
+        let b = create_test_item("banana", 100, false, FileCategory::Regular, 50.0);
+
+        let result = compare_file_items(&a, &b, SortColumn::Name, false);
+        assert_eq!(result, std::cmp::Ordering::Greater);
+    }
+
+    #[test]
+    fn test_sort_by_size_ascending() {
+        let small = create_test_item("small.txt", 100, false, FileCategory::Regular, 50.0);
+        let large = create_test_item("large.txt", 10000, false, FileCategory::Regular, 50.0);
+
+        let result = compare_file_items(&small, &large, SortColumn::Size, true);
+        assert_eq!(result, std::cmp::Ordering::Less);
+    }
+
+    #[test]
+    fn test_sort_by_size_descending() {
+        let small = create_test_item("small.txt", 100, false, FileCategory::Regular, 50.0);
+        let large = create_test_item("large.txt", 10000, false, FileCategory::Regular, 50.0);
+
+        let result = compare_file_items(&small, &large, SortColumn::Size, false);
+        assert_eq!(result, std::cmp::Ordering::Greater);
+    }
+
+    #[test]
+    fn test_sort_by_category() {
+        let mustkeep = create_test_item("system", 100, false, FileCategory::MustKeep, 100.0);
+        let useless = create_test_item("temp", 100, false, FileCategory::Useless, 5.0);
+
+        let result = compare_file_items(&mustkeep, &useless, SortColumn::Category, true);
+        assert_eq!(result, std::cmp::Ordering::Less);
+    }
+
+    #[test]
+    fn test_sort_by_usefulness() {
+        let high = create_test_item("important", 100, false, FileCategory::Regular, 95.0);
+        let low = create_test_item("junk", 100, false, FileCategory::Regular, 25.0);
+
+        let result = compare_file_items(&low, &high, SortColumn::Usefulness, true);
+        assert_eq!(result, std::cmp::Ordering::Less);
+
+        let result = compare_file_items(&low, &high, SortColumn::Usefulness, false);
+        assert_eq!(result, std::cmp::Ordering::Greater);
+    }
+
+    // ==================== Search/Filter Tests ====================
+
+    #[test]
+    fn test_filter_empty_query_returns_all() {
+        let items = vec![
+            create_test_item("file1.txt", 100, false, FileCategory::Regular, 50.0),
+            create_test_item("file2.txt", 200, false, FileCategory::Regular, 50.0),
+        ];
+
+        let filtered = filter_items(&items, "");
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn test_filter_by_name() {
+        let items = vec![
+            create_test_item("document.pdf", 100, false, FileCategory::Regular, 50.0),
+            create_test_item("image.png", 200, false, FileCategory::Regular, 50.0),
+            create_test_item("document_backup.pdf", 300, false, FileCategory::Regular, 50.0),
+        ];
+
+        let filtered = filter_items(&items, "document");
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().all(|i| i.name.contains("document")));
+    }
+
+    #[test]
+    fn test_filter_case_insensitive() {
+        let items = vec![
+            create_test_item("Document.PDF", 100, false, FileCategory::Regular, 50.0),
+            create_test_item("IMAGE.PNG", 200, false, FileCategory::Regular, 50.0),
+        ];
+
+        let filtered = filter_items(&items, "document");
+        assert_eq!(filtered.len(), 1);
+
+        let filtered = filter_items(&items, "DOCUMENT");
+        assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn test_filter_no_matches() {
+        let items = vec![
+            create_test_item("file1.txt", 100, false, FileCategory::Regular, 50.0),
+            create_test_item("file2.txt", 200, false, FileCategory::Regular, 50.0),
+        ];
+
+        let filtered = filter_items(&items, "xyz");
+        assert_eq!(filtered.len(), 0);
+    }
+
+    // ==================== Multi-Selection Tests ====================
+
+    #[test]
+    fn test_hashset_selection() {
+        let mut selected: HashSet<PathBuf> = HashSet::new();
+
+        // Add items
+        selected.insert(PathBuf::from("C:\\file1.txt"));
+        selected.insert(PathBuf::from("C:\\file2.txt"));
+        assert_eq!(selected.len(), 2);
+
+        // Toggle (remove existing)
+        selected.remove(&PathBuf::from("C:\\file1.txt"));
+        assert_eq!(selected.len(), 1);
+        assert!(!selected.contains(&PathBuf::from("C:\\file1.txt")));
+        assert!(selected.contains(&PathBuf::from("C:\\file2.txt")));
+
+        // Clear
+        selected.clear();
+        assert_eq!(selected.len(), 0);
+    }
+
+    #[test]
+    fn test_range_selection() {
+        let items = vec![
+            create_test_item("file0.txt", 100, false, FileCategory::Regular, 50.0),
+            create_test_item("file1.txt", 100, false, FileCategory::Regular, 50.0),
+            create_test_item("file2.txt", 100, false, FileCategory::Regular, 50.0),
+            create_test_item("file3.txt", 100, false, FileCategory::Regular, 50.0),
+            create_test_item("file4.txt", 100, false, FileCategory::Regular, 50.0),
+        ];
+
+        let mut selected: HashSet<PathBuf> = HashSet::new();
+        let anchor = 1;
+        let end = 3;
+
+        // Select range from anchor to end
+        for idx in anchor..=end {
+            selected.insert(items[idx].path.clone());
+        }
+
+        assert_eq!(selected.len(), 3);
+        assert!(selected.contains(&items[1].path));
+        assert!(selected.contains(&items[2].path));
+        assert!(selected.contains(&items[3].path));
+    }
+
+    // ==================== FileItem Tests ====================
+
+    #[test]
+    fn test_file_item_creation() {
+        let item = FileItem {
+            path: PathBuf::from("C:\\test\\file.txt"),
+            name: "file.txt".to_string(),
+            size: 1024,
+            is_dir: false,
+            category: FileCategory::Regular,
+            usefulness: 60.0,
+            modified: None,
+            child_count: None,
+        };
+
+        assert_eq!(item.name, "file.txt");
+        assert_eq!(item.size, 1024);
+        assert!(!item.is_dir);
+        assert!(matches!(item.category, FileCategory::Regular));
+        assert_eq!(item.usefulness, 60.0);
+    }
 
     #[test]
     fn test_file_item_empty_folder_detection() {
-        let empty_item = FileItem {
-            path: PathBuf::from("C:\\test\\empty"),
+        let empty_folder = FileItem {
+            path: PathBuf::from("C:\\empty"),
             name: "empty".to_string(),
             size: 0,
             is_dir: true,
@@ -2075,10 +2770,10 @@ mod tests {
             modified: None,
             child_count: Some(0),
         };
-        assert!(empty_item.child_count == Some(0));
+        assert!(empty_folder.child_count == Some(0));
 
-        let non_empty_item = FileItem {
-            path: PathBuf::from("C:\\test\\full"),
+        let non_empty_folder = FileItem {
+            path: PathBuf::from("C:\\full"),
             name: "full".to_string(),
             size: 1000,
             is_dir: true,
@@ -2087,7 +2782,7 @@ mod tests {
             modified: None,
             child_count: Some(5),
         };
-        assert!(non_empty_item.child_count != Some(0));
+        assert!(non_empty_folder.child_count != Some(0));
     }
 
     // ==================== UI State Tests ====================
@@ -2104,37 +2799,114 @@ mod tests {
     #[test]
     fn test_toast_expiry() {
         let mut time_left: f32 = 2.0;
-
-        // Simulate time passing
         time_left -= 0.5;
-        assert!(time_left > 0.0); // Still visible
-
+        assert!(time_left > 0.0);
         time_left -= 1.5;
-        assert!(time_left <= 0.0); // Should be hidden
+        assert!(time_left <= 0.0);
     }
 
-    // ==================== Navigation State Tests ====================
+    // ==================== Navigation Tests ====================
 
     #[test]
     fn test_navigation_history_tracking() {
         let mut history: Vec<PathBuf> = Vec::new();
         let mut index: usize = 0;
 
-        // Navigate to first path
         history.push(PathBuf::from("C:\\"));
         index = history.len() - 1;
         assert_eq!(index, 0);
 
-        // Navigate to second path
         history.push(PathBuf::from("C:\\Users"));
         index = history.len() - 1;
         assert_eq!(index, 1);
 
-        // Go back
         if index > 0 {
             index -= 1;
         }
         assert_eq!(index, 0);
         assert_eq!(history[index], PathBuf::from("C:\\"));
+    }
+
+    #[test]
+    fn test_navigation_forward() {
+        let history = vec![
+            PathBuf::from("C:\\"),
+            PathBuf::from("C:\\Users"),
+            PathBuf::from("C:\\Users\\John"),
+        ];
+        let mut index = 1; // Currently at Users
+
+        // Go forward
+        if index < history.len() - 1 {
+            index += 1;
+        }
+        assert_eq!(index, 2);
+        assert_eq!(history[index], PathBuf::from("C:\\Users\\John"));
+    }
+
+    // ==================== Sort Column Tests ====================
+
+    #[test]
+    fn test_sort_column_enum() {
+        let name = SortColumn::Name;
+        let size = SortColumn::Size;
+        let cat = SortColumn::Category;
+        let useful = SortColumn::Usefulness;
+
+        assert!(matches!(name, SortColumn::Name));
+        assert!(matches!(size, SortColumn::Size));
+        assert!(matches!(cat, SortColumn::Category));
+        assert!(matches!(useful, SortColumn::Usefulness));
+    }
+
+    // ==================== Category Enum Tests ====================
+
+    #[test]
+    fn test_file_category_variants() {
+        let mustkeep = FileCategory::MustKeep;
+        let system = FileCategory::System;
+        let regular = FileCategory::Regular;
+        let useless = FileCategory::Useless;
+        let unknown = FileCategory::Unknown;
+
+        assert!(matches!(mustkeep, FileCategory::MustKeep));
+        assert!(matches!(system, FileCategory::System));
+        assert!(matches!(regular, FileCategory::Regular));
+        assert!(matches!(useless, FileCategory::Useless));
+        assert!(matches!(unknown, FileCategory::Unknown));
+    }
+
+    // ==================== Edge Case Tests ====================
+
+    #[test]
+    fn test_empty_filename() {
+        let (cat, score) = categorize_file("C:\\", "", true, 0);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 65.0); // Default folder usefulness
+    }
+
+    #[test]
+    fn test_very_large_file_size() {
+        let huge_size: u64 = 10_000_000_000_000; // 10 TB
+        let (cat, score) = categorize_file("C:\\huge.dat", "huge.dat", false, huge_size);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 45.0); // Large unknown file
+    }
+
+    #[test]
+    fn test_deep_nested_path() {
+        let deep_path = "C:\\a\\b\\c\\d\\e\\f\\g\\h\\i\\j\\file.txt";
+        let (cat, score) = categorize_file(deep_path, "file.txt", false, 100);
+        assert!(matches!(cat, FileCategory::Regular));
+        assert_eq!(score, 90.0); // txt file
+    }
+
+    #[test]
+    fn test_special_characters_in_name() {
+        let (cat, _) = categorize_file("C:\\file (1).txt", "file (1).txt", false, 100);
+        assert!(matches!(cat, FileCategory::Regular));
+
+        let (cat, _) = categorize_file("C:\\file [backup].txt", "file [backup].txt", false, 100);
+        assert!(matches!(cat, FileCategory::Regular));
     }
 }
