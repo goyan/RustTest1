@@ -72,6 +72,8 @@ struct DiskDashboard {
     // Multi-file selection
     selected_items: HashSet<PathBuf>,
     last_selected_index: Option<usize>,
+    selection_anchor: Option<usize>, // For drag/scroll selection
+    is_selecting: bool, // True when mouse held for selection
     // Track loaded path to avoid reloading every frame
     last_loaded_path: Option<PathBuf>,
 }
@@ -103,6 +105,8 @@ impl Default for DiskDashboard {
             pending_size_calculations: HashSet::new(),
             selected_items: HashSet::new(),
             last_selected_index: None,
+            selection_anchor: None,
+            is_selecting: false,
             last_loaded_path: None,
         }
     }
@@ -1559,7 +1563,39 @@ impl DiskDashboard {
 
         // Handle click on entire row - support multi-selection
         let modifiers = ui.input(|i| i.modifiers);
-        if interact_response.clicked() {
+
+        // Track mouse down for scroll selection
+        if interact_response.drag_started() {
+            self.is_selecting = true;
+            self.selection_anchor = Some(index);
+            if !modifiers.ctrl {
+                self.selected_items.clear();
+            }
+            self.selected_items.insert(item.path.clone());
+            self.last_selected_index = Some(index);
+        }
+
+        // Extend selection while dragging/hovering with mouse held
+        if self.is_selecting && is_hovered && ui.input(|i| i.pointer.primary_down()) {
+            if let Some(anchor) = self.selection_anchor {
+                let start = anchor.min(index);
+                let end = anchor.max(index);
+                // Select range from anchor to current
+                for i in start..=end {
+                    if i < self.filtered_items.len() {
+                        self.selected_items.insert(self.filtered_items[i].path.clone());
+                    }
+                }
+                self.last_selected_index = Some(index);
+            }
+        }
+
+        // Stop selection on mouse release
+        if ui.input(|i| i.pointer.primary_released()) {
+            self.is_selecting = false;
+        }
+
+        if interact_response.clicked() && !self.is_selecting {
             if modifiers.ctrl {
                 // Ctrl+click: toggle selection
                 if self.selected_items.contains(&item.path) {
@@ -1582,8 +1618,8 @@ impl DiskDashboard {
                     self.selected_items.insert(item.path.clone());
                     self.last_selected_index = Some(index);
                 }
-            } else if interact_response.double_clicked() || item.is_dir {
-                // Double-click or single click on folder: navigate/open
+            } else if interact_response.double_clicked() {
+                // Double-click: navigate folder or open file
                 if item.is_dir {
                     if is_empty_folder {
                         self.toast_message = Some(("📂 This folder is empty".to_string(), 2.0));
@@ -1591,7 +1627,6 @@ impl DiskDashboard {
                         self.navigate_to(item.path.clone());
                     }
                 } else {
-                    // Double-click on file: open
                     #[cfg(target_os = "windows")]
                     {
                         let _ = std::process::Command::new("cmd")
@@ -1600,11 +1635,13 @@ impl DiskDashboard {
                     }
                     self.toast_message = Some((format!("📄 Opening {}", item.name), 1.5));
                 }
-            } else {
-                // Single click: select only this item
-                self.selected_items.clear();
-                self.selected_items.insert(item.path.clone());
-                self.last_selected_index = Some(index);
+            } else if item.is_dir && self.selected_items.len() <= 1 {
+                // Single click on folder (when not multi-selecting): navigate
+                if is_empty_folder {
+                    self.toast_message = Some(("📂 This folder is empty".to_string(), 2.0));
+                } else {
+                    self.navigate_to(item.path.clone());
+                }
             }
         }
 
