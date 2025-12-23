@@ -73,6 +73,7 @@ struct DiskDashboard {
     selected_items: HashSet<PathBuf>,
     last_selected_index: Option<usize>,
     selection_anchor: Option<usize>, // For drag/scroll selection
+    selection_end: Option<usize>, // Current end of selection range
     is_selecting: bool, // True when mouse held for selection
     // Track loaded path to avoid reloading every frame
     last_loaded_path: Option<PathBuf>,
@@ -106,6 +107,7 @@ impl Default for DiskDashboard {
             selected_items: HashSet::new(),
             last_selected_index: None,
             selection_anchor: None,
+            selection_end: None,
             is_selecting: false,
             last_loaded_path: None,
         }
@@ -176,7 +178,7 @@ impl eframe::App for DiskDashboard {
             ctx.request_repaint();
         }
 
-        // Handle keyboard shortcuts
+        // Handle keyboard shortcuts and scroll selection
         ctx.input(|i| {
             // Mouse forward/backward buttons
             if i.pointer.button_pressed(egui::PointerButton::Extra1) {
@@ -185,7 +187,7 @@ impl eframe::App for DiskDashboard {
             if i.pointer.button_pressed(egui::PointerButton::Extra2) {
                 self.navigate_forward();
             }
-            
+
             // Keyboard shortcuts
             if i.key_pressed(egui::Key::Backspace) && i.modifiers.ctrl {
                 self.navigate_back();
@@ -204,6 +206,43 @@ impl eframe::App for DiskDashboard {
             // Focus search with Ctrl+F
             if i.key_pressed(egui::Key::F) && i.modifiers.ctrl {
                 // Search will be focused in UI
+            }
+
+            // Scroll wheel selection: when mouse held + scroll, extend selection
+            if self.is_selecting && i.pointer.primary_down() {
+                let scroll = i.raw_scroll_delta.y;
+                if scroll.abs() > 0.0 {
+                    if let (Some(anchor), Some(current_end)) = (self.selection_anchor, self.selection_end) {
+                        let items_len = self.filtered_items.len();
+                        if items_len > 0 {
+                            // Extend selection based on scroll direction
+                            let new_end = if scroll > 0.0 {
+                                // Scroll up - decrease index
+                                current_end.saturating_sub(1)
+                            } else {
+                                // Scroll down - increase index
+                                (current_end + 1).min(items_len - 1)
+                            };
+                            self.selection_end = Some(new_end);
+
+                            // Update selection range
+                            self.selected_items.clear();
+                            let start = anchor.min(new_end);
+                            let end = anchor.max(new_end);
+                            for idx in start..=end {
+                                if idx < items_len {
+                                    self.selected_items.insert(self.filtered_items[idx].path.clone());
+                                }
+                            }
+                            self.last_selected_index = Some(new_end);
+                        }
+                    }
+                }
+            }
+
+            // Reset selection mode when mouse released
+            if i.pointer.primary_released() {
+                self.is_selecting = false;
             }
         });
 
@@ -1565,9 +1604,10 @@ impl DiskDashboard {
         let modifiers = ui.input(|i| i.modifiers);
 
         // Track mouse down for scroll selection
-        if interact_response.drag_started() {
+        if interact_response.drag_started() || (ui.input(|i| i.pointer.primary_pressed()) && is_hovered) {
             self.is_selecting = true;
             self.selection_anchor = Some(index);
+            self.selection_end = Some(index);
             if !modifiers.ctrl {
                 self.selected_items.clear();
             }
@@ -1578,9 +1618,11 @@ impl DiskDashboard {
         // Extend selection while dragging/hovering with mouse held
         if self.is_selecting && is_hovered && ui.input(|i| i.pointer.primary_down()) {
             if let Some(anchor) = self.selection_anchor {
+                self.selection_end = Some(index);
                 let start = anchor.min(index);
                 let end = anchor.max(index);
                 // Select range from anchor to current
+                self.selected_items.clear();
                 for i in start..=end {
                     if i < self.filtered_items.len() {
                         self.selected_items.insert(self.filtered_items[i].path.clone());
