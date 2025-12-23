@@ -1080,7 +1080,7 @@ impl DiskDashboard {
 
         let size_str = if item.is_dir {
             if item.size > 0 {
-                format_size(item.size)
+                format_size(item.size) // Show calculated folder size
             } else {
                 match item.child_count {
                     Some(0) => "Empty".to_string(),
@@ -1089,7 +1089,7 @@ impl DiskDashboard {
                 }
             }
         } else {
-            format_size(item.size)
+            format_size(item.size) // Show file size
         };
 
         let is_empty_folder = item.is_dir && item.child_count == Some(0);
@@ -1145,17 +1145,45 @@ impl DiskDashboard {
             .inner_margin(egui::Margin::same(10.0))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    // Icon column - different icons for empty vs non-empty folders
+                    // Icon column - different icons for folders and file types
                     let icon_size = 18.0;
                     let icon_text = if item.is_dir {
                         if is_empty_folder { "📂" } else { "📁" }
                     } else {
-                        match item.category {
-                            FileCategory::MustKeep => "🔒",
-                            FileCategory::System => "⚙️",
-                            FileCategory::Regular => "📄",
-                            FileCategory::Useless => "🗑️",
-                            FileCategory::Unknown => "❓",
+                        // Get file extension for icon selection
+                        let ext = item.path.extension()
+                            .and_then(|e| e.to_str())
+                            .map(|e| e.to_lowercase())
+                            .unwrap_or_default();
+
+                        match ext.as_str() {
+                            // Images
+                            "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "svg" | "ico" => "🖼️",
+                            // Videos
+                            "mp4" | "avi" | "mkv" | "mov" | "wmv" | "flv" | "webm" => "🎬",
+                            // Audio
+                            "mp3" | "wav" | "flac" | "ogg" | "aac" | "m4a" => "🎵",
+                            // Documents
+                            "pdf" => "📕",
+                            "doc" | "docx" => "📘",
+                            "xls" | "xlsx" => "📗",
+                            "ppt" | "pptx" => "📙",
+                            "txt" | "md" | "rtf" => "📝",
+                            // Code
+                            "rs" | "py" | "js" | "ts" | "java" | "c" | "cpp" | "h" | "cs" | "go" => "💻",
+                            "html" | "css" | "json" | "xml" | "yaml" | "toml" => "🌐",
+                            // Archives
+                            "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" => "📦",
+                            // Executables
+                            "exe" | "msi" | "bat" | "cmd" | "ps1" | "sh" => "⚡",
+                            // Default by category
+                            _ => match item.category {
+                                FileCategory::MustKeep => "🔒",
+                                FileCategory::System => "⚙️",
+                                FileCategory::Regular => "📄",
+                                FileCategory::Useless => "🗑️",
+                                FileCategory::Unknown => "❓",
+                            }
                         }
                     };
 
