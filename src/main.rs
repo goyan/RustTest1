@@ -3,7 +3,9 @@ use sysinfo::Disks;
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::time::SystemTime;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::thread;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 #[allow(dead_code)]
@@ -63,10 +65,15 @@ struct DiskDashboard {
     toast_message: Option<(String, f32)>, // (message, time_remaining)
     // Folder size cache for efficient recursive size calculation
     folder_size_cache: HashMap<PathBuf, u64>,
+    // Async folder size calculation
+    size_sender: Sender<(PathBuf, u64)>,
+    size_receiver: Receiver<(PathBuf, u64)>,
+    pending_size_calculations: HashSet<PathBuf>,
 }
 
 impl Default for DiskDashboard {
     fn default() -> Self {
+        let (sender, receiver) = channel();
         Self {
             disks: Disks::new_with_refreshed_list(),
             refresh_interval: 1.0,
@@ -86,6 +93,9 @@ impl Default for DiskDashboard {
             needs_refresh: false,
             toast_message: None,
             folder_size_cache: HashMap::new(),
+            size_sender: sender,
+            size_receiver: receiver,
+            pending_size_calculations: HashSet::new(),
         }
     }
 }
@@ -93,11 +103,12 @@ impl Default for DiskDashboard {
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1200.0, 800.0])
-            .with_min_inner_size([1000.0, 650.0])
+            .with_inner_size([1100.0, 700.0])
+            .with_min_inner_size([900.0, 550.0])
             .with_title("Disk Capacity Dashboard")
             .with_decorations(true)
-            .with_resizable(true),
+            .with_resizable(true)
+            .with_maximized(false),
         ..Default::default()
     };
 
@@ -127,6 +138,30 @@ impl eframe::App for DiskDashboard {
             } else {
                 ctx.request_repaint(); // Keep animating
             }
+        }
+
+        // Check for completed async folder size calculations
+        let mut sizes_updated = false;
+        while let Ok((path, size)) = self.size_receiver.try_recv() {
+            self.folder_size_cache.insert(path.clone(), size);
+            self.pending_size_calculations.remove(&path);
+            sizes_updated = true;
+        }
+        // Update file items with new sizes
+        if sizes_updated {
+            for item in &mut self.file_items {
+                if item.is_dir {
+                    if let Some(&size) = self.folder_size_cache.get(&item.path) {
+                        item.size = size;
+                    }
+                }
+            }
+            self.apply_filter_and_sort();
+            ctx.request_repaint();
+        }
+        // Request repaint if calculations pending
+        if !self.pending_size_calculations.is_empty() {
+            ctx.request_repaint();
         }
 
         // Handle keyboard shortcuts
@@ -717,7 +752,7 @@ impl DiskDashboard {
         ctx.set_style(style);
     }
 
-    fn analyze_file(&self, path: &Path, name: &str, _is_dir: bool, size: u64) -> (FileCategory, f32) {
+    fn analyze_file(&self, path: &Path, name: &str, is_dir: bool, size: u64) -> (FileCategory, f32) {
         let name_lower = name.to_lowercase();
         let path_str = path.to_string_lossy().to_lowercase();
 
@@ -726,14 +761,14 @@ impl DiskDashboard {
            path_str.contains("windows\\syswow64") ||
            path_str.contains("program files") ||
            path_str.contains("programdata") ||
-           name == "boot" ||
-           name == "bootmgr" ||
-           name == "pagefile.sys" ||
-           name == "hiberfil.sys" ||
-           name == "$RECYCLE.BIN" ||
-           name == "System Volume Information" ||
-           name == "Recovery" ||
+           name_lower == "windows" ||
+           name_lower == "boot" ||
+           name_lower == "bootmgr" ||
+           name_lower == "pagefile.sys" ||
+           name_lower == "hiberfil.sys" ||
            name_lower == "$recycle.bin" ||
+           name_lower == "system volume information" ||
+           name_lower == "recovery" ||
            name_lower.starts_with("$") {
             return (FileCategory::MustKeep, 100.0);
         }
@@ -760,18 +795,100 @@ impl DiskDashboard {
             return (FileCategory::System, 85.0);
         }
 
-        // Large files that might be deletable
-        if size > 1_000_000_000 && ( // > 1GB
-           name_lower.ends_with(".zip") ||
-           name_lower.ends_with(".rar") ||
-           name_lower.ends_with(".7z") ||
-           name_lower.ends_with(".iso") ||
-           name_lower.ends_with(".dmg")) {
+        // Get file extension for detailed analysis
+        let ext = path.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_lowercase())
+            .unwrap_or_default();
+
+        // Important user data - high usefulness
+        let important_extensions = ["doc", "docx", "xls", "xlsx", "ppt", "pptx", "pdf",
+                                    "txt", "md", "rtf", "odt", "ods", "odp"];
+        if important_extensions.contains(&ext.as_str()) {
+            return (FileCategory::Regular, 90.0);
+        }
+
+        // Photos - very important to users
+        let photo_extensions = ["jpg", "jpeg", "png", "gif", "bmp", "webp", "raw", "cr2", "nef", "arw"];
+        if photo_extensions.contains(&ext.as_str()) {
+            return (FileCategory::Regular, 95.0);
+        }
+
+        // Videos - important but large
+        let video_extensions = ["mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "m4v"];
+        if video_extensions.contains(&ext.as_str()) {
+            // Larger videos slightly less useful (more likely to be deletable)
+            let usefulness = if size > 1_000_000_000 { 70.0 } else { 85.0 };
+            return (FileCategory::Regular, usefulness);
+        }
+
+        // Audio - important
+        let audio_extensions = ["mp3", "wav", "flac", "ogg", "aac", "m4a", "wma"];
+        if audio_extensions.contains(&ext.as_str()) {
+            return (FileCategory::Regular, 80.0);
+        }
+
+        // Code and projects - important for developers
+        let code_extensions = ["rs", "py", "js", "ts", "java", "c", "cpp", "h", "cs", "go",
+                              "html", "css", "json", "xml", "yaml", "toml", "sql"];
+        if code_extensions.contains(&ext.as_str()) {
+            return (FileCategory::Regular, 85.0);
+        }
+
+        // Archives - depends on size, often can be deleted after extraction
+        let archive_extensions = ["zip", "rar", "7z", "tar", "gz", "bz2"];
+        if archive_extensions.contains(&ext.as_str()) {
+            let usefulness = if size > 1_000_000_000 { 30.0 }  // >1GB - likely can delete
+                            else if size > 100_000_000 { 45.0 }  // >100MB
+                            else { 55.0 };
+            return (FileCategory::Regular, usefulness);
+        }
+
+        // ISOs and disk images - usually can be deleted
+        if ext == "iso" || ext == "dmg" || ext == "img" {
+            return (FileCategory::Regular, 25.0);
+        }
+
+        // Executables and installers - often safe to delete after install
+        let installer_extensions = ["exe", "msi", "bat", "cmd", "ps1"];
+        if installer_extensions.contains(&ext.as_str()) {
+            // Installers in Downloads are less useful
+            if path_str.contains("downloads") {
+                return (FileCategory::Regular, 35.0);
+            }
+            return (FileCategory::Regular, 60.0);
+        }
+
+        // Old backup files
+        if name_lower.ends_with(".bak") || name_lower.ends_with(".old") || name_lower.contains("backup") {
             return (FileCategory::Regular, 40.0);
         }
 
-        // Regular files
-        (FileCategory::Regular, 60.0)
+        // Folders - base usefulness on contents
+        if is_dir {
+            // Node modules, build folders - low usefulness
+            if name_lower == "node_modules" || name_lower == "target" ||
+               name_lower == "build" || name_lower == "dist" || name_lower == ".git" {
+                return (FileCategory::Regular, 30.0);
+            }
+            // User folders - high usefulness
+            if name_lower == "documents" || name_lower == "pictures" ||
+               name_lower == "music" || name_lower == "videos" {
+                return (FileCategory::Regular, 95.0);
+            }
+            // Downloads - medium, often contains deletable files
+            if name_lower == "downloads" {
+                return (FileCategory::Regular, 50.0);
+            }
+            // Default folder usefulness
+            return (FileCategory::Regular, 65.0);
+        }
+
+        // Default for unknown files - base on size
+        let usefulness = if size > 500_000_000 { 45.0 }  // >500MB - might want to check
+                        else if size > 100_000_000 { 55.0 }  // >100MB
+                        else { 60.0 };
+        (FileCategory::Regular, usefulness)
     }
 
     fn sort_file_items(&mut self) {
@@ -834,20 +951,29 @@ impl DiskDashboard {
         }
     }
 
-    /// Get folder size recursively with caching
+    /// Get folder size - returns cached value or starts async calculation
     fn get_folder_size_recursive(&mut self, path: &Path) -> u64 {
         // Check cache first
         if let Some(&size) = self.folder_size_cache.get(path) {
             return size;
         }
 
-        // Calculate recursively
-        let size = calculate_dir_size_recursive(path);
+        // Check if calculation is already pending
+        if self.pending_size_calculations.contains(path) {
+            return 0; // Return 0 while calculating
+        }
 
-        // Cache the result
-        self.folder_size_cache.insert(path.to_path_buf(), size);
+        // Start async calculation
+        let path_buf = path.to_path_buf();
+        let sender = self.size_sender.clone();
+        self.pending_size_calculations.insert(path_buf.clone());
 
-        size
+        thread::spawn(move || {
+            let size = calculate_dir_size_recursive(&path_buf);
+            let _ = sender.send((path_buf, size));
+        });
+
+        0 // Return 0 while calculating
     }
 
     fn render_file_browser(&mut self, ui: &mut egui::Ui, current_path: &Path) {
@@ -1209,12 +1335,23 @@ impl DiskDashboard {
                         .sense(egui::Sense::click())
                     );
 
-                    // Name click also respects empty folder restriction
-                    if name_response.clicked() && item.is_dir {
-                        if is_empty_folder {
-                            self.toast_message = Some(("📂 This folder is empty".to_string(), 2.0));
+                    // Name click - navigate for folders, open for files
+                    if name_response.clicked() {
+                        if item.is_dir {
+                            if is_empty_folder {
+                                self.toast_message = Some(("📂 This folder is empty".to_string(), 2.0));
+                            } else {
+                                self.navigate_to(item.path.clone());
+                            }
                         } else {
-                            self.navigate_to(item.path.clone());
+                            // Open file with default application
+                            #[cfg(target_os = "windows")]
+                            {
+                                let _ = std::process::Command::new("cmd")
+                                    .args(["/C", "start", "", &item.path.to_string_lossy()])
+                                    .spawn();
+                            }
+                            self.toast_message = Some((format!("📄 Opening {}", item.name), 1.5));
                         }
                     }
 
@@ -1343,13 +1480,24 @@ impl DiskDashboard {
             ui.painter().rect_filled(bar_rect, 4.0, bar_color);
         }
 
-        // Handle click on entire row for directories
-        if interact_response.clicked() && item.is_dir {
-            if is_empty_folder {
-                // Show toast message instead of navigating
-                self.toast_message = Some(("📂 This folder is empty".to_string(), 2.0));
+        // Handle click on entire row
+        if interact_response.clicked() {
+            if item.is_dir {
+                if is_empty_folder {
+                    // Show toast message instead of navigating
+                    self.toast_message = Some(("📂 This folder is empty".to_string(), 2.0));
+                } else {
+                    self.navigate_to(item.path.clone());
+                }
             } else {
-                self.navigate_to(item.path.clone());
+                // Open file with default application
+                #[cfg(target_os = "windows")]
+                {
+                    let _ = std::process::Command::new("cmd")
+                        .args(["/C", "start", "", &item.path.to_string_lossy()])
+                        .spawn();
+                }
+                self.toast_message = Some((format!("📄 Opening {}", item.name), 1.5));
             }
         }
 

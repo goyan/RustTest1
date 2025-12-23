@@ -13,17 +13,18 @@
 ### File Browser (Right)
 - [x] Browse files and folders
 - [x] Sort by Name, Size, Category, Usefulness (with ▲▼ indicators)
-- [x] File type icons based on extension
+- [x] File type icons based on extension (images, videos, audio, code, etc.)
 - [x] Folder icons (📁 non-empty, 📂 empty)
-- [x] Recursive folder size calculation (cached, depth-limited)
+- [x] **Async folder size calculation** (background threads, non-blocking)
 - [x] Full-width progress bars showing relative size
 - [x] Category badges (MustKeep, System, Regular, Useless)
-- [x] Usefulness scoring
+- [x] **Smart usefulness scoring** (based on file type, size, location)
 - [x] Search/filter (Ctrl+F)
 - [x] Context menu with delete option
-- [x] Protected system folder detection
+- [x] Protected system folder detection (Windows, Program Files, etc.)
 - [x] Toast notifications
 - [x] Empty folder detection and blocking
+- [x] **Click to open files** with default application
 
 ### Navigation
 - [x] Breadcrumb path display
@@ -35,7 +36,6 @@
 ## Pending Features
 
 ### High Priority
-- [ ] Async folder size calculation (background thread)
 - [ ] Progress indicator while calculating sizes
 - [ ] Disk space analysis/visualization
 - [ ] Smart cleanup suggestions (AI-powered)
@@ -66,10 +66,10 @@
 - sysinfo - System information
 
 ### Performance
+- **Async folder size calculation** (non-blocking UI)
 - Folder size depth limit: 2 levels
-- Size cache for efficiency
+- Size cache (HashMap) for efficiency
 - Skip system folders during calculation
 
 ## Known Issues
-- Large folders may cause brief UI freeze during size calculation
 - Some system folders may show incorrect sizes due to access restrictions

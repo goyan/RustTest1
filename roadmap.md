@@ -8,11 +8,12 @@
 | 0.1.0 | 2024-12 | Initial release with disk monitoring |
 | 0.2.0 | 2024-12 | File browser, delete, navigation |
 | 0.3.0 | 2024-12 | Recursive folder sizes, file type icons |
+| 0.4.0 | 2024-12 | Async folder sizes, smart usefulness, file open |
 
 ### Estimated Development Cost
-- AI Development: ~$30-50 USD (Claude Opus 4.5)
-- Development Time: ~4-6 hours
-- Lines of Code: ~1800
+- AI Development: ~$40-60 USD (Claude Opus 4.5)
+- Development Time: ~6-8 hours
+- Lines of Code: ~1900
 
 ---
 
@@ -32,16 +33,18 @@
 - [x] Empty folder detection
 - [x] Search/filter
 - [x] Keyboard shortcuts
+- [x] Click to open files with default app
 
-## Phase 3: Performance (In Progress)
+## Phase 3: Performance (Complete)
 - [x] Recursive folder size calculation
 - [x] Size caching with HashMap
 - [x] Depth-limited recursion
-- [ ] **Async background calculation**
+- [x] **Async background calculation** (non-blocking UI)
 - [ ] Progress indicator during calculation
 - [ ] Lazy loading for large directories
 
 ## Phase 4: Smart Features (Planned)
+- [x] **Smart usefulness scoring** (file type, size, location)
 - [ ] AI-powered cleanup suggestions
 - [ ] Duplicate file detection
 - [ ] Large file finder
@@ -61,7 +64,6 @@
 ## Known Issues
 | Priority | Issue | Status |
 |----------|-------|--------|
-| High | Large folders cause brief UI freeze | Needs async |
 | Medium | Some system folders show 0 size | Access restrictions |
 | Low | Column alignment on resize | Minor |
 
@@ -75,12 +77,15 @@
 
 ## Sprint Notes
 
-### Current Sprint
+### Current Sprint (Complete)
 - Fix progress bar positioning ✓
 - Add file type icons ✓
-- Create roadmap.md ✓
+- Implement async folder size calculation ✓
+- Smart usefulness scoring ✓
+- Click to open files ✓
+- Fix Windows folder category ✓
 
 ### Next Sprint
-- Implement async folder size calculation
-- Add progress indicator
+- Add progress indicator for folder sizes
+- E2E test automation refinement
 - Improve large directory handling
