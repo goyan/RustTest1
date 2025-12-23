@@ -1,110 +1,109 @@
-# 💾 Disk Capacity Dashboard
+# Disk Capacity Dashboard
 
-A modern, futuristic Rust application that displays real-time disk capacity information in a beautiful dashboard interface.
+A modern Rust application for real-time disk capacity monitoring and file management with a beautiful dark-themed UI.
 
 ## Features
 
-- 🚀 **Real-time monitoring** - Automatically refreshes disk information
-- 🎨 **Modern UI** - Clean, futuristic design with dark theme
-- ⚡ **Fast & Efficient** - Built with Rust for optimal performance
-- 📊 **Visual Progress Bars** - Easy-to-read capacity indicators
-- 🖥️ **Multi-Disk Support** - Shows all connected drives
-- 🎯 **Color-coded Alerts** - Visual warnings for high disk usage
+### Disk Monitoring
+- Real-time disk space monitoring with auto-refresh
+- Multi-disk support showing all connected drives
+- Drive names displayed (e.g., "C:\ (Windows)")
+- Color-coded usage alerts (green < 75%, orange 75-90%, red > 90%)
+- Pie chart visualization of total disk usage
+
+### File Browser
+- Browse files and folders on any disk
+- Recursive folder size calculation with caching
+- Full-width background progress bars showing relative sizes
+- File categorization (MustKeep, System, Regular, Useless)
+- Usefulness scoring for cleanup suggestions
+- Empty folder detection with visual indicators
+
+### File Management
+- Context menu with delete option
+- Protected system folder detection ($RECYCLE.BIN, System Volume Information, etc.)
+- Confirmation dialogs before deletion
+- Toast notifications for user feedback
+
+### Navigation
+- Breadcrumb navigation
+- Back/Forward navigation (Alt+Arrow, mouse buttons)
+- Search/filter files (Ctrl+F)
+- Sortable columns (Name, Size, Category, Usefulness)
 
 ## Installation
 
-### Step 1: Install Rust
+### Prerequisites
+- Rust toolchain (install from https://rustup.rs/)
 
-**For Windows (Recommended):**
+### Build and Run
 
-1. Download and run the Rust installer from: https://rustup.rs/
-2. Or use PowerShell:
-   ```powershell
-   winget install Rustlang.Rustup
-   ```
-3. Restart your terminal after installation
-
-**Verify installation:**
 ```powershell
-rustc --version
-cargo --version
+# Clone the repository
+git clone https://github.com/goyan/RustTest1.git
+cd RustTest1
+
+# Build release version
+cargo build --release
+
+# Run the application
+./target/release/disk-dashboard.exe
 ```
 
-### Step 2: Build and Run
+## Keyboard Shortcuts
 
-1. Navigate to the project directory:
-   ```powershell
-   cd RustTest1
-   ```
-
-2. Build the project:
-   ```powershell
-   cargo build --release
-   ```
-
-3. Run the application:
-   ```powershell
-   cargo run --release
-   ```
-
-Or simply run:
-```powershell
-cargo run
-```
-
-## Usage
-
-The dashboard will automatically:
-- Detect all connected disks (HDD, SSD, etc.)
-- Display disk name, type, and mount point
-- Show total, used, and available space
-- Update information every second
-- Color-code disks based on usage:
-  - 🟢 Green: < 75% full
-  - 🟠 Orange: 75-90% full
-  - 🔴 Red: > 90% full
+| Shortcut | Action |
+|----------|--------|
+| Alt+Left | Navigate back |
+| Alt+Right | Navigate forward |
+| Ctrl+Home | Go to home (disk selection) |
+| Ctrl+F | Focus search |
 
 ## Project Structure
 
 ```
 RustTest1/
-├── Cargo.toml      # Project dependencies and metadata
+├── Cargo.toml          # Dependencies
 ├── src/
-│   └── main.rs     # Main application code
-└── README.md       # This file
+│   └── main.rs         # Main application (~1700 lines)
+├── README.md           # This file
+└── .gitignore
 ```
 
 ## Dependencies
 
-- **eframe** - Application framework for egui
-- **egui** - Immediate mode GUI library
+- **eframe/egui** - Immediate mode GUI framework
 - **sysinfo** - System information gathering
-- **tokio** - Async runtime (for future enhancements)
 
-## Troubleshooting
+## Development
 
-### Rust not found
-- Make sure Rust is installed and added to PATH
-- Restart your terminal after installation
-- Run `rustup update` to ensure latest version
+This project was developed with AI assistance using Claude Code (Opus 4.5).
 
-### Build errors
-- Run `cargo clean` and try again
-- Ensure you have the latest Rust toolchain: `rustup update stable`
+### Estimated AI Development Cost
+- Session tokens used: ~45GB context
+- Estimated API cost: ~$30-50 USD
+- Development time: ~4 hours of iterative development
 
-### GUI not displaying
-- Make sure you're running on Windows (native, not WSL)
-- Check that graphics drivers are up to date
+### Key Implementation Details
+- Recursive folder size calculation with HashMap caching
+- Custom pie chart rendering using egui painter
+- Hover detection before rendering for proper immediate-mode UI
+- Fixed-width column layout for header/content alignment
 
-## Future Enhancements
+## Unit Tests
 
-- Custom refresh intervals
-- Disk I/O statistics
-- Historical usage graphs
-- Disk health monitoring
-- Export data to CSV/JSON
+Run tests with:
+```powershell
+cargo test
+```
+
+16 tests covering:
+- Size formatting
+- Empty folder navigation blocking
+- Protected path detection
+- Toast notifications
+- Navigation history
 
 ## License
 
-This project is open source and available for personal use.
-
+Open source for personal use.
