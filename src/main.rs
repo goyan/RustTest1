@@ -69,6 +69,11 @@ struct DiskDashboard {
     size_sender: Sender<(PathBuf, u64)>,
     size_receiver: Receiver<(PathBuf, u64)>,
     pending_size_calculations: HashSet<PathBuf>,
+    // Multi-file selection
+    selected_items: HashSet<PathBuf>,
+    last_selected_index: Option<usize>,
+    // Track loaded path to avoid reloading every frame
+    last_loaded_path: Option<PathBuf>,
 }
 
 impl Default for DiskDashboard {
@@ -96,6 +101,9 @@ impl Default for DiskDashboard {
             size_sender: sender,
             size_receiver: receiver,
             pending_size_calculations: HashSet::new(),
+            selected_items: HashSet::new(),
+            last_selected_index: None,
+            last_loaded_path: None,
         }
     }
 }
@@ -200,14 +208,18 @@ impl eframe::App for DiskDashboard {
             self.needs_refresh = false;
             if let Some(ref path) = self.current_path.clone() {
                 self.load_directory(path);
+                self.last_loaded_path = Some(path.clone());
             }
         }
 
-        // Refresh file list if path changed
-        let path_to_load = self.current_path.clone();
-        if let Some(ref path) = path_to_load {
-            if !self.loading {
+        // Load directory only when path changes (not every frame!)
+        if self.current_path != self.last_loaded_path {
+            if let Some(ref path) = self.current_path.clone() {
                 self.load_directory(path);
+                self.last_loaded_path = Some(path.clone());
+                self.selected_items.clear(); // Clear selection on navigation
+            } else {
+                self.last_loaded_path = None;
             }
         }
 
@@ -1152,13 +1164,62 @@ impl DiskDashboard {
                     });
                 ui.add_space(8.0);
 
-                // Back button for directories
-                if let Some(parent) = current_path.parent() {
-                    if ui.button(format!("⬆️ .. ({})", parent.to_string_lossy())).clicked() {
-                        self.navigate_to(parent.to_path_buf());
+                // Back button and selection actions
+                ui.horizontal(|ui| {
+                    if let Some(parent) = current_path.parent() {
+                        if ui.button(format!("⬆️ .. ({})", parent.to_string_lossy())).clicked() {
+                            self.navigate_to(parent.to_path_buf());
+                        }
                     }
-                    ui.separator();
-                }
+
+                    // Show selection count and delete button when items selected
+                    if !self.selected_items.is_empty() {
+                        ui.separator();
+                        ui.label(egui::RichText::new(format!("📋 {} selected", self.selected_items.len()))
+                            .color(egui::Color32::from_rgb(100, 180, 255)));
+
+                        if ui.add(egui::Button::new("🗑️ Delete Selected")
+                            .fill(egui::Color32::from_rgb(150, 50, 50)))
+                            .clicked()
+                        {
+                            // Delete all selected items
+                            let mut deleted = 0;
+                            let mut errors = Vec::new();
+                            for path in self.selected_items.clone() {
+                                let result = if path.is_dir() {
+                                    fs::remove_dir_all(&path)
+                                } else {
+                                    fs::remove_file(&path)
+                                };
+                                match result {
+                                    Ok(_) => {
+                                        deleted += 1;
+                                        // Invalidate cache for ancestors
+                                        let mut ancestor = path.parent();
+                                        while let Some(parent) = ancestor {
+                                            self.folder_size_cache.remove(parent);
+                                            self.pending_size_calculations.remove(parent);
+                                            ancestor = parent.parent();
+                                        }
+                                    }
+                                    Err(e) => errors.push(format!("{}: {}", path.file_name().unwrap_or_default().to_string_lossy(), e)),
+                                }
+                            }
+                            self.selected_items.clear();
+                            self.needs_refresh = true;
+                            if errors.is_empty() {
+                                self.toast_message = Some((format!("🗑️ Deleted {} items", deleted), 2.0));
+                            } else {
+                                self.toast_message = Some((format!("⚠️ Deleted {} items, {} failed", deleted, errors.len()), 3.0));
+                            }
+                        }
+
+                        if ui.button("❌ Clear Selection").clicked() {
+                            self.selected_items.clear();
+                        }
+                    }
+                });
+                ui.separator();
 
                 // Show loading indicator
                 if self.loading {
@@ -1184,7 +1245,8 @@ impl DiskDashboard {
             });
     }
 
-    fn render_file_item(&mut self, ui: &mut egui::Ui, item: &FileItem, _index: usize) {
+    fn render_file_item(&mut self, ui: &mut egui::Ui, item: &FileItem, index: usize) {
+        let is_selected = self.selected_items.contains(&item.path);
 
         let category_text = match item.category {
             FileCategory::MustKeep => "Must Keep",
@@ -1246,15 +1308,19 @@ impl DiskDashboard {
         let interact_response = ui.interact(interact_rect, item_id, sense);
         let is_hovered = interact_response.hovered();
 
-        // Modern clean file item design with proper hover
-        // Empty folders get a muted appearance
-        let base_fill = if is_empty_folder {
+        // Modern clean file item design with proper hover and selection
+        // Selected items get blue tint, empty folders get muted appearance
+        let base_fill = if is_selected {
+            egui::Color32::from_rgb(40, 60, 90) // Blue tint for selected
+        } else if is_empty_folder {
             egui::Color32::from_rgb(22, 24, 28) // Darker for empty
         } else {
             egui::Color32::from_rgb(25, 27, 32)
         };
 
-        let hover_fill = if is_empty_folder {
+        let hover_fill = if is_selected {
+            egui::Color32::from_rgb(50, 75, 110) // Brighter blue for selected+hover
+        } else if is_empty_folder {
             egui::Color32::from_rgb(35, 38, 45) // Less bright hover for empty
         } else {
             egui::Color32::from_rgb(40, 45, 58)
@@ -1491,24 +1557,54 @@ impl DiskDashboard {
             ui.painter().rect_filled(bar_rect, 4.0, bar_color);
         }
 
-        // Handle click on entire row
+        // Handle click on entire row - support multi-selection
+        let modifiers = ui.input(|i| i.modifiers);
         if interact_response.clicked() {
-            if item.is_dir {
-                if is_empty_folder {
-                    // Show toast message instead of navigating
-                    self.toast_message = Some(("📂 This folder is empty".to_string(), 2.0));
+            if modifiers.ctrl {
+                // Ctrl+click: toggle selection
+                if self.selected_items.contains(&item.path) {
+                    self.selected_items.remove(&item.path);
                 } else {
-                    self.navigate_to(item.path.clone());
+                    self.selected_items.insert(item.path.clone());
+                }
+                self.last_selected_index = Some(index);
+            } else if modifiers.shift {
+                // Shift+click: range selection
+                if let Some(last_idx) = self.last_selected_index {
+                    let start = last_idx.min(index);
+                    let end = last_idx.max(index);
+                    for i in start..=end {
+                        if i < self.filtered_items.len() {
+                            self.selected_items.insert(self.filtered_items[i].path.clone());
+                        }
+                    }
+                } else {
+                    self.selected_items.insert(item.path.clone());
+                    self.last_selected_index = Some(index);
+                }
+            } else if interact_response.double_clicked() || item.is_dir {
+                // Double-click or single click on folder: navigate/open
+                if item.is_dir {
+                    if is_empty_folder {
+                        self.toast_message = Some(("📂 This folder is empty".to_string(), 2.0));
+                    } else {
+                        self.navigate_to(item.path.clone());
+                    }
+                } else {
+                    // Double-click on file: open
+                    #[cfg(target_os = "windows")]
+                    {
+                        let _ = std::process::Command::new("cmd")
+                            .args(["/C", "start", "", &item.path.to_string_lossy()])
+                            .spawn();
+                    }
+                    self.toast_message = Some((format!("📄 Opening {}", item.name), 1.5));
                 }
             } else {
-                // Open file with default application
-                #[cfg(target_os = "windows")]
-                {
-                    let _ = std::process::Command::new("cmd")
-                        .args(["/C", "start", "", &item.path.to_string_lossy()])
-                        .spawn();
-                }
-                self.toast_message = Some((format!("📄 Opening {}", item.name), 1.5));
+                // Single click: select only this item
+                self.selected_items.clear();
+                self.selected_items.insert(item.path.clone());
+                self.last_selected_index = Some(index);
             }
         }
 
