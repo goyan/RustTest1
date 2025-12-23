@@ -119,12 +119,23 @@ def run_test():
     left, top, width, height = win_info
     print(f"Window at: ({left}, {top}) size: {width}x{height}")
 
-    # Calculate relative positions based on window
-    # Left panel is roughly 280px wide
-    left_panel_center = left + 140
-    right_panel_left = left + 300
-    right_panel_center = left + (width // 2) + 100
-    header_y = top + 120
+    # Calculate DYNAMIC positions based on window dimensions
+    # Left panel is ~25% of width, right panel is ~75%
+    left_panel_width = int(width * 0.25)
+    left_panel_center = left + left_panel_width // 2
+
+    right_panel_left = left + left_panel_width
+    right_panel_width = width - left_panel_width
+    right_panel_center = right_panel_left + right_panel_width // 2
+
+    # Header is ~15% from top, content starts ~25% from top
+    header_y = top + int(height * 0.15)
+    content_start_y = top + int(height * 0.30)
+    row_height = int(height * 0.06)  # ~6% per row
+
+    # Column positions (from right edge): Use ~85%, ~92% of right panel
+    cat_col_x = right_panel_left + int(right_panel_width * 0.75)
+    size_col_x = right_panel_left + int(right_panel_width * 0.85)
 
     time.sleep(0.5)
 
@@ -132,30 +143,27 @@ def run_test():
     print("\n[Test 1] Initial state")
     screenshot("01_initial", APP_REGION)
 
-    # Test 2: Click on first disk (should be around y=200 from top)
+    # Test 2: Click on first disk (at ~25% height in left panel)
     print("\n[Test 2] Click on C: drive")
-    disk_y = top + 200
+    disk_y = top + int(height * 0.25)
     click_at(left_panel_center, disk_y, "C: drive card")
     time.sleep(1)
     screenshot("02_after_disk_click", APP_REGION)
 
     # Test 3: Check if file browser appeared, click on a folder
     print("\n[Test 3] Click on first item in file list")
-    first_item_y = top + 250
-    click_at(right_panel_center, first_item_y, "First file/folder")
+    click_at(right_panel_center, content_start_y + row_height, "First file/folder")
     time.sleep(0.5)
     screenshot("03_after_item_click", APP_REGION)
 
     # Test 4: Click Cat column header to test sorting
     print("\n[Test 4] Click Cat column to sort")
-    cat_col_x = right_panel_left + 350  # Cat column area
     click_at(cat_col_x, header_y, "Cat column header")
     time.sleep(0.3)
     screenshot("04_after_cat_sort", APP_REGION)
 
     # Test 5: Click Size column
     print("\n[Test 5] Click Size column to sort")
-    size_col_x = right_panel_left + 430  # Size column area
     click_at(size_col_x, header_y, "Size column header")
     time.sleep(0.3)
     screenshot("05_after_size_sort", APP_REGION)
@@ -163,14 +171,14 @@ def run_test():
     # Test 6: Test hover effects
     print("\n[Test 6] Testing hover effects")
     for i in range(4):
-        hover_y = top + 250 + (i * 45)
+        hover_y = content_start_y + (i * row_height)
         pyautogui.moveTo(right_panel_center, hover_y)
         time.sleep(0.2)
     screenshot("06_hover_test", APP_REGION)
 
-    # Test 7: Navigate back using .. button
+    # Test 7: Navigate back using .. button (at ~22% height)
     print("\n[Test 7] Click back/parent button")
-    back_btn_y = top + 180
+    back_btn_y = top + int(height * 0.22)
     click_at(right_panel_left + 50, back_btn_y, "Back button")
     time.sleep(0.5)
     screenshot("07_after_back", APP_REGION)

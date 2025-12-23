@@ -1204,9 +1204,12 @@ impl DiskDashboard {
             egui::Color32::from_rgb(100, 255, 100) // Green - high usefulness
         };
 
+        let is_calculating = self.pending_size_calculations.contains(&item.path);
         let size_str = if item.is_dir {
             if item.size > 0 {
                 format_size(item.size) // Show calculated folder size
+            } else if is_calculating {
+                "⏳".to_string() // Show loading indicator
             } else {
                 match item.child_count {
                     Some(0) => "Empty".to_string(),

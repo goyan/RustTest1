@@ -3,7 +3,27 @@
     "allow": [
       "Bash(git init:*)",
       "Bash(gh auth status:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(gh repo create:*)",
+      "Bash(git push)",
+      "Bash(cargo run:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo test:*)",
+      "Bash(targetreleasedisk-dashboard.exe)",
+      "Bash(./target/release/disk-dashboard.exe:*)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(powershell -Command \"Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::PrimaryScreen.Bounds | ForEach-Object { $bitmap = New-Object System.Drawing.Bitmap\\($_Width, $_Height\\); $graphics = [System.Drawing.Graphics]::FromImage\\($bitmap\\); $graphics.CopyFromScreen\\($_Location, [System.Drawing.Point]::Empty, $_Size\\); $bitmap.Save\\(''C:\\\\Users\\\\hmeun\\\\Documents\\\\GitHub\\\\RustTest1\\\\screenshot.png''\\); }\")",
+      "Bash(powershell -ExecutionPolicy Bypass -File \"C:\\\\Users\\\\hmeun\\\\Documents\\\\GitHub\\\\RustTest1\\\\screenshot.ps1\")",
+      "WebSearch",
+      "Bash(pip show:*)",
+      "Bash(pip install:*)",
+      "Bash(python e2e_test.py:*)",
+      "Bash(Start-Process -FilePath \".\\\\target\\\\release\\\\disk-dashboard.exe\" -WindowStyle Normal)",
+      "Bash(timeout:*)",
+      "Bash(start \"\" \"target\\\\release\\\\disk-dashboard.exe\")"
     ]
   }
 }

@@ -11,9 +11,10 @@
 | 0.4.0 | 2024-12 | Async folder sizes, smart usefulness, file open |
 
 ### Estimated Development Cost
-- AI Development: ~$40-60 USD (Claude Opus 4.5)
-- Development Time: ~6-8 hours
-- Lines of Code: ~1900
+- AI Development: ~$30-40 USD (Claude Opus 4.5)
+- Estimated Tokens: ~800k input, ~200k output
+- Development Sessions: 3-4 sessions
+- Lines of Code: ~1930
 
 ---
 
