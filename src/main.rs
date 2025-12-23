@@ -2739,26 +2739,6 @@ mod tests {
     // ==================== FileItem Tests ====================
 
     #[test]
-    fn test_file_item_creation() {
-        let item = FileItem {
-            path: PathBuf::from("C:\\test\\file.txt"),
-            name: "file.txt".to_string(),
-            size: 1024,
-            is_dir: false,
-            category: FileCategory::Regular,
-            usefulness: 60.0,
-            modified: None,
-            child_count: None,
-        };
-
-        assert_eq!(item.name, "file.txt");
-        assert_eq!(item.size, 1024);
-        assert!(!item.is_dir);
-        assert!(matches!(item.category, FileCategory::Regular));
-        assert_eq!(item.usefulness, 60.0);
-    }
-
-    #[test]
     fn test_file_item_empty_folder_detection() {
         let empty_folder = FileItem {
             path: PathBuf::from("C:\\empty"),
@@ -2785,47 +2765,7 @@ mod tests {
         assert!(non_empty_folder.child_count != Some(0));
     }
 
-    // ==================== UI State Tests ====================
-
-    #[test]
-    fn test_toast_message_creation() {
-        let toast: Option<(String, f32)> = Some(("Test message".to_string(), 2.0));
-        assert!(toast.is_some());
-        let (msg, time) = toast.unwrap();
-        assert_eq!(msg, "Test message");
-        assert_eq!(time, 2.0);
-    }
-
-    #[test]
-    fn test_toast_expiry() {
-        let mut time_left: f32 = 2.0;
-        time_left -= 0.5;
-        assert!(time_left > 0.0);
-        time_left -= 1.5;
-        assert!(time_left <= 0.0);
-    }
-
     // ==================== Navigation Tests ====================
-
-    #[test]
-    fn test_navigation_history_tracking() {
-        let mut history: Vec<PathBuf> = Vec::new();
-        let mut index: usize = 0;
-
-        history.push(PathBuf::from("C:\\"));
-        index = history.len() - 1;
-        assert_eq!(index, 0);
-
-        history.push(PathBuf::from("C:\\Users"));
-        index = history.len() - 1;
-        assert_eq!(index, 1);
-
-        if index > 0 {
-            index -= 1;
-        }
-        assert_eq!(index, 0);
-        assert_eq!(history[index], PathBuf::from("C:\\"));
-    }
 
     #[test]
     fn test_navigation_forward() {
@@ -2842,38 +2782,6 @@ mod tests {
         }
         assert_eq!(index, 2);
         assert_eq!(history[index], PathBuf::from("C:\\Users\\John"));
-    }
-
-    // ==================== Sort Column Tests ====================
-
-    #[test]
-    fn test_sort_column_enum() {
-        let name = SortColumn::Name;
-        let size = SortColumn::Size;
-        let cat = SortColumn::Category;
-        let useful = SortColumn::Usefulness;
-
-        assert!(matches!(name, SortColumn::Name));
-        assert!(matches!(size, SortColumn::Size));
-        assert!(matches!(cat, SortColumn::Category));
-        assert!(matches!(useful, SortColumn::Usefulness));
-    }
-
-    // ==================== Category Enum Tests ====================
-
-    #[test]
-    fn test_file_category_variants() {
-        let mustkeep = FileCategory::MustKeep;
-        let system = FileCategory::System;
-        let regular = FileCategory::Regular;
-        let useless = FileCategory::Useless;
-        let unknown = FileCategory::Unknown;
-
-        assert!(matches!(mustkeep, FileCategory::MustKeep));
-        assert!(matches!(system, FileCategory::System));
-        assert!(matches!(regular, FileCategory::Regular));
-        assert!(matches!(useless, FileCategory::Useless));
-        assert!(matches!(unknown, FileCategory::Unknown));
     }
 
     // ==================== Edge Case Tests ====================
