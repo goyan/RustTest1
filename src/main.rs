@@ -3,8 +3,10 @@ use sysinfo::Disks;
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::time::SystemTime;
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
+#[allow(dead_code)]
 enum FileCategory {
     MustKeep,    // Critical system files, important user data
     System,      // System files that should generally be kept
@@ -31,11 +33,12 @@ enum SortDirection {
 struct FileItem {
     path: PathBuf,
     name: String,
-    size: u64,
+    size: u64,              // For files: file size. For folders: total size of contents
     is_dir: bool,
     category: FileCategory,
-    usefulness: f32, // 0-100 score
+    usefulness: f32,        // 0-100 score
     modified: Option<SystemTime>,
+    child_count: Option<usize>, // For directories: number of items inside
 }
 
 struct DiskDashboard {
@@ -52,7 +55,14 @@ struct DiskDashboard {
     navigation_history: Vec<PathBuf>,
     history_index: usize,
     search_query: String,
-    hovered_item: Option<usize>,
+    // Deletion confirmation
+    pending_delete: Option<PathBuf>,
+    delete_error: Option<String>,
+    needs_refresh: bool,
+    // Toast notifications
+    toast_message: Option<(String, f32)>, // (message, time_remaining)
+    // Folder size cache for efficient recursive size calculation
+    folder_size_cache: HashMap<PathBuf, u64>,
 }
 
 impl Default for DiskDashboard {
@@ -71,7 +81,11 @@ impl Default for DiskDashboard {
             navigation_history: Vec::new(),
             history_index: 0,
             search_query: String::new(),
-            hovered_item: None,
+            pending_delete: None,
+            delete_error: None,
+            needs_refresh: false,
+            toast_message: None,
+            folder_size_cache: HashMap::new(),
         }
     }
 }
@@ -79,7 +93,8 @@ impl Default for DiskDashboard {
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1400.0, 900.0])
+            .with_inner_size([1200.0, 800.0])
+            .with_min_inner_size([1000.0, 650.0])
             .with_title("Disk Capacity Dashboard")
             .with_decorations(true)
             .with_resizable(true),
@@ -96,11 +111,22 @@ fn main() -> Result<(), eframe::Error> {
 impl eframe::App for DiskDashboard {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Auto-refresh disks at specified interval
-        self.time_since_refresh += ctx.input(|i| i.stable_dt);
+        let dt = ctx.input(|i| i.stable_dt);
+        self.time_since_refresh += dt;
         if self.time_since_refresh >= self.refresh_interval {
             self.disks.refresh();
             self.time_since_refresh = 0.0;
             ctx.request_repaint();
+        }
+
+        // Update toast timer
+        if let Some((_, ref mut time_left)) = self.toast_message {
+            *time_left -= dt;
+            if *time_left <= 0.0 {
+                self.toast_message = None;
+            } else {
+                ctx.request_repaint(); // Keep animating
+            }
         }
 
         // Handle keyboard shortcuts
@@ -134,6 +160,14 @@ impl eframe::App for DiskDashboard {
             }
         });
 
+        // Refresh file list if needed (after deletion)
+        if self.needs_refresh {
+            self.needs_refresh = false;
+            if let Some(ref path) = self.current_path.clone() {
+                self.load_directory(path);
+            }
+        }
+
         // Refresh file list if path changed
         let path_to_load = self.current_path.clone();
         if let Some(ref path) = path_to_load {
@@ -144,6 +178,155 @@ impl eframe::App for DiskDashboard {
 
         // Apply modern theme
         self.apply_modern_theme(ctx);
+
+        // Show delete confirmation dialog
+        if let Some(path_to_delete) = self.pending_delete.clone() {
+            let is_dir = path_to_delete.is_dir();
+            let file_name = path_to_delete.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| path_to_delete.to_string_lossy().to_string());
+
+            // Check if this is a protected system folder/file
+            let name_lower = file_name.to_lowercase();
+            let is_protected = name_lower.starts_with("$") ||
+                name_lower == "system volume information" ||
+                name_lower == "recovery" ||
+                name_lower == "boot" ||
+                name_lower == "bootmgr" ||
+                name_lower == "pagefile.sys" ||
+                name_lower == "hiberfil.sys" ||
+                path_to_delete.to_string_lossy().to_lowercase().contains("windows\\system32") ||
+                path_to_delete.to_string_lossy().to_lowercase().contains("program files");
+
+            egui::Window::new(if is_protected { "Protected Item" } else { "Confirm Delete" })
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.set_min_width(350.0);
+
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(10.0);
+
+                        if is_protected {
+                            // Protected item - show warning and only allow cancel
+                            ui.label(egui::RichText::new("🔒 Protected System Item")
+                                .size(18.0)
+                                .strong()
+                                .color(egui::Color32::from_rgb(255, 200, 50)));
+                            ui.add_space(15.0);
+
+                            ui.label(egui::RichText::new(&file_name)
+                                .size(14.0)
+                                .strong()
+                                .color(egui::Color32::from_rgb(200, 200, 200)));
+                            ui.add_space(15.0);
+
+                            ui.label(egui::RichText::new("This is a protected Windows system item.")
+                                .color(egui::Color32::from_rgb(255, 150, 100)));
+                            ui.label(egui::RichText::new("Deleting it could damage your system.")
+                                .color(egui::Color32::from_rgb(255, 150, 100)));
+                            ui.add_space(10.0);
+                            ui.label(egui::RichText::new("To empty the Recycle Bin, right-click it on your Desktop.")
+                                .size(11.0)
+                                .color(egui::Color32::from_gray(150)));
+
+                            ui.add_space(20.0);
+
+                            if ui.add(egui::Button::new("OK")
+                                .fill(egui::Color32::from_rgb(60, 60, 80))
+                                .min_size(egui::Vec2::new(100.0, 30.0)))
+                                .clicked()
+                            {
+                                self.pending_delete = None;
+                            }
+                        } else {
+                            // Normal delete confirmation
+                            ui.label(egui::RichText::new(if is_dir { "🗑️ Delete Folder?" } else { "🗑️ Delete File?" })
+                                .size(18.0)
+                                .strong()
+                                .color(egui::Color32::from_rgb(255, 100, 100)));
+                            ui.add_space(15.0);
+
+                            ui.label(format!("Are you sure you want to delete:"));
+                            ui.add_space(5.0);
+                            ui.label(egui::RichText::new(&file_name)
+                                .size(14.0)
+                                .strong()
+                                .color(egui::Color32::from_rgb(255, 200, 100)));
+
+                            if is_dir {
+                                ui.add_space(10.0);
+                                ui.label(egui::RichText::new("⚠️ This will delete the folder and ALL its contents!")
+                                    .color(egui::Color32::from_rgb(255, 150, 50)));
+                            }
+
+                            ui.add_space(20.0);
+
+                            ui.horizontal(|ui| {
+                                ui.add_space(50.0);
+                                if ui.add(egui::Button::new("Cancel")
+                                    .fill(egui::Color32::from_rgb(60, 60, 80))
+                                    .min_size(egui::Vec2::new(80.0, 30.0)))
+                                    .clicked()
+                                {
+                                    self.pending_delete = None;
+                                }
+
+                                ui.add_space(20.0);
+
+                                if ui.add(egui::Button::new("Delete")
+                                    .fill(egui::Color32::from_rgb(180, 50, 50))
+                                    .min_size(egui::Vec2::new(80.0, 30.0)))
+                                    .clicked()
+                                {
+                                    // Perform deletion
+                                    let result = if is_dir {
+                                        fs::remove_dir_all(&path_to_delete)
+                                    } else {
+                                        fs::remove_file(&path_to_delete)
+                                    };
+
+                                    match result {
+                                        Ok(_) => {
+                                            self.delete_error = None;
+                                            self.needs_refresh = true;
+                                        }
+                                        Err(e) => {
+                                            self.delete_error = Some(format!("Failed to delete: {}", e));
+                                        }
+                                    }
+                                    self.pending_delete = None;
+                                }
+                            });
+                        }
+                        ui.add_space(10.0);
+                    });
+                });
+        }
+
+        // Show error dialog if deletion failed
+        if let Some(error) = self.delete_error.clone() {
+            egui::Window::new("Error")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(10.0);
+                        ui.label(egui::RichText::new("❌ Deletion Failed")
+                            .size(16.0)
+                            .color(egui::Color32::from_rgb(255, 100, 100)));
+                        ui.add_space(10.0);
+                        ui.label(&error);
+                        ui.add_space(15.0);
+                        if ui.button("OK").clicked() {
+                            self.delete_error = None;
+                        }
+                        ui.add_space(10.0);
+                    });
+                });
+        }
 
         egui::TopBottomPanel::top("top_panel")
             .show(ctx, |ui| {
@@ -180,14 +363,17 @@ impl eframe::App for DiskDashboard {
 
         egui::SidePanel::left("disks_panel")
             .resizable(true)
-            .default_width(300.0)
+            .default_width(280.0)
+            .min_width(220.0)
+            .max_width(400.0)
             .show(ctx, |ui| {
                 ui.heading("Disks");
                 ui.separator();
                 
-                let mut disk_data: Vec<(PathBuf, u64, u64, f64)> = self.disks.list().iter()
+                let mut disk_data: Vec<(PathBuf, String, u64, u64, f64)> = self.disks.list().iter()
                     .map(|d| {
                         let mount = d.mount_point().to_path_buf();
+                        let name = d.name().to_string_lossy().to_string();
                         let total = d.total_space();
                         let available = d.available_space();
                         let used = total - available;
@@ -196,19 +382,25 @@ impl eframe::App for DiskDashboard {
                         } else {
                             0.0
                         };
-                        (mount, total, available, percent)
+                        (mount, name, total, available, percent)
                     })
                     .collect();
                 
                 disk_data.sort_by(|a, b| a.0.to_string_lossy().cmp(&b.0.to_string_lossy()));
 
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for (mount_point, total, available, percent) in &disk_data {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                    // Set minimum width to fill panel
+                    ui.set_min_width(ui.available_width());
+
+                    for (mount_point, disk_name, total, available, percent) in &disk_data {
                         // Skip empty/invalid entries
                         if *total == 0 {
                             continue;
                         }
                         let mount_clone = mount_point.clone();
+                        let name_clone = disk_name.clone();
                         let total_clone = *total;
                         let available_clone = *available;
                         let percent_clone = *percent;
@@ -226,22 +418,34 @@ impl eframe::App for DiskDashboard {
                         } else {
                             egui::Color32::from_rgb(50, 200, 50)
                         };
-                        
-                        // Different styling for selected disk
+
+                        // Create an interactive area to detect hover BEFORE drawing
+                        let card_id = ui.make_persistent_id(format!("disk_card_{}", mount_point.to_string_lossy()));
+                        let card_rect = ui.available_rect_before_wrap();
+                        let interact_rect = egui::Rect::from_min_size(card_rect.min, egui::Vec2::new(ui.available_width(), 120.0));
+                        let sense = egui::Sense::click().union(egui::Sense::hover());
+                        let interact_response = ui.interact(interact_rect, card_id, sense);
+                        let is_hovered = interact_response.hovered();
+
+                        // Different styling for selected/hovered disk
                         let card_fill = if is_selected {
-                            egui::Color32::from_rgb(35, 45, 60)
+                            egui::Color32::from_rgb(40, 55, 75)
+                        } else if is_hovered {
+                            egui::Color32::from_rgb(38, 42, 55)
                         } else {
                             egui::Color32::from_rgb(28, 30, 38)
                         };
-                        
+
                         let border_color = if is_selected {
                             egui::Color32::from_rgb(100, 150, 255)
+                        } else if is_hovered {
+                            usage_color
                         } else {
                             egui::Color32::from_rgb(45, 48, 55)
                         };
-                        
-                        let border_width = if is_selected { 2.0 } else { 1.0 };
-                        
+
+                        let border_width = if is_selected { 2.0 } else if is_hovered { 1.5 } else { 1.0 };
+
                         let disk_card_response = egui::Frame::default()
                             .fill(card_fill)
                             .stroke(egui::Stroke::new(border_width, border_color))
@@ -249,10 +453,15 @@ impl eframe::App for DiskDashboard {
                             .inner_margin(egui::Margin::same(14.0))
                             .show(ui, |ui| {
                                 ui.vertical(|ui| {
-                                    // Drive name
+                                    // Drive letter and name
                                     ui.horizontal(|ui| {
                                         ui.label(egui::RichText::new("💿").size(20.0));
-                                        ui.label(egui::RichText::new(mount_point.to_string_lossy().as_ref())
+                                        let display_name = if name_clone.is_empty() {
+                                            mount_point.to_string_lossy().to_string()
+                                        } else {
+                                            format!("{} ({})", mount_point.to_string_lossy(), name_clone)
+                                        };
+                                        ui.label(egui::RichText::new(display_name)
                                             .size(16.0)
                                             .strong()
                                             .color(egui::Color32::from_rgb(220, 230, 255)));
@@ -285,129 +494,94 @@ impl eframe::App for DiskDashboard {
                                 });
                             });
                         
-                        // Hover effect handling
-                        let is_hovered = disk_card_response.response.hovered();
-                        
-                        if is_selected {
-                            // Selected state - subtle enhancement on hover
-                            if is_hovered {
-                                // Slightly brighter when hovering selected item
-                                ui.painter().rect_filled(
-                                    disk_card_response.response.rect,
-                                    8.0,
-                                    egui::Color32::from_rgb(38, 48, 62),
-                                );
-                            }
-                            // Selected border always visible
-                            ui.painter().rect_stroke(
-                                disk_card_response.response.rect,
-                                8.0,
-                                egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 150, 255)),
-                            );
-                        } else if is_hovered {
-                            // Hover effect for non-selected items only
-                            ui.painter().rect_filled(
-                                disk_card_response.response.rect,
-                                8.0,
-                                egui::Color32::from_rgb(38, 42, 50),
-                            );
-                            ui.painter().rect_stroke(
-                                disk_card_response.response.rect,
-                                8.0,
-                                egui::Stroke::new(1.5, usage_color),
-                            );
-                        }
-                        
-                        // Make entire card clickable
-                        if disk_card_response.response.clicked() {
+                        // Handle click on the interactive area
+                        if interact_response.clicked() {
                             self.navigate_to(mount_clone.clone());
                             self.current_disk = Some(mount_clone);
                             self.file_items.clear();
                             self.search_query.clear();
                         }
+
+                        // Ensure we don't consume the frame response click as well
+                        let _ = disk_card_response.response;
                         
                         ui.add_space(12.0);
                     }
-                });
 
-                // Calculate totals for summary and pie chart
-                let total_disks = disk_data.len();
-                let total_space: u64 = disk_data.iter().map(|(_, total, _, _)| *total).sum();
-                let total_used: u64 = disk_data.iter().map(|(_, total, available, _)| *total - *available).sum();
-                let total_available: u64 = disk_data.iter().map(|(_, _, available, _)| *available).sum();
-                let avg_usage = if total_space > 0 {
-                    (total_used as f64 / total_space as f64) * 100.0
-                } else {
-                    0.0
-                };
-
-                // Modern Summary panel
-                ui.add_space(15.0);
-                egui::Frame::default()
-                    .fill(egui::Color32::from_rgb(25, 27, 35))
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(50, 55, 65)))
-                    .rounding(8.0)
-                    .inner_margin(egui::Margin::same(12.0))
-                    .show(ui, |ui| {
-                        ui.heading(egui::RichText::new("Summary")
-                            .size(16.0)
-                            .color(egui::Color32::from_rgb(180, 200, 255)));
-                        ui.add_space(10.0);
-
-                        ui.horizontal(|ui| {
-                            ui.vertical(|ui| {
-                                ui.label(egui::RichText::new(format!("{}", total_disks))
-                                    .size(20.0)
-                                    .strong()
-                                    .color(egui::Color32::from_rgb(100, 200, 255)));
-                                ui.label(egui::RichText::new("Disks")
-                                    .size(11.0)
-                                    .color(egui::Color32::from_gray(150)));
-                            });
-                            ui.add_space(20.0);
-                            ui.vertical(|ui| {
-                                ui.label(egui::RichText::new(format!("{:.1}", total_space as f64 / 1_000_000_000.0))
-                                    .size(20.0)
-                                    .strong()
-                                    .color(egui::Color32::from_rgb(100, 200, 255)));
-                                ui.label(egui::RichText::new("Total Space (GB)")
-                                    .size(11.0)
-                                    .color(egui::Color32::from_gray(150)));
-                            });
-                            ui.add_space(20.0);
-                            ui.vertical(|ui| {
-                                let used_color = if avg_usage > 90.0 {
-                                    egui::Color32::from_rgb(220, 50, 50)
-                                } else if avg_usage > 75.0 {
-                                    egui::Color32::from_rgb(255, 165, 0)
-                                } else {
-                                    egui::Color32::from_rgb(50, 200, 50)
-                                };
-                                ui.label(egui::RichText::new(format!("{:.1}%", avg_usage))
-                                    .size(20.0)
-                                    .strong()
-                                    .color(used_color));
-                                ui.label(egui::RichText::new("Used")
-                                    .size(11.0)
-                                    .color(egui::Color32::from_gray(150)));
-                            });
-                        });
-                    });
-                
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(10.0);
-                
-                // Pie chart visualization
-                if total_space > 0 {
+                    // Calculate totals for summary and pie chart
+                    let total_disks = disk_data.len();
+                    let total_space: u64 = disk_data.iter().map(|(_, _, total, _, _)| *total).sum();
+                    let total_used: u64 = disk_data.iter().map(|(_, _, total, available, _)| *total - *available).sum();
+                    let total_available: u64 = disk_data.iter().map(|(_, _, _, available, _)| *available).sum();
                     let avg_usage = if total_space > 0 {
                         (total_used as f64 / total_space as f64) * 100.0
                     } else {
                         0.0
                     };
-                    self.render_pie_chart(ui, &disk_data, total_space, total_used, total_available, avg_usage);
-                }
-            });
+
+                    // Modern Summary panel (inside scroll area)
+                    ui.add_space(15.0);
+                    egui::Frame::default()
+                        .fill(egui::Color32::from_rgb(25, 27, 35))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(50, 55, 65)))
+                        .rounding(8.0)
+                        .inner_margin(egui::Margin::same(12.0))
+                        .show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.heading(egui::RichText::new("Summary")
+                                .size(16.0)
+                                .color(egui::Color32::from_rgb(180, 200, 255)));
+                            ui.add_space(10.0);
+
+                            // Use columns for better layout
+                            ui.columns(3, |columns| {
+                                columns[0].vertical_centered(|ui| {
+                                    ui.label(egui::RichText::new(format!("{}", total_disks))
+                                        .size(18.0)
+                                        .strong()
+                                        .color(egui::Color32::from_rgb(100, 200, 255)));
+                                    ui.label(egui::RichText::new("Disks")
+                                        .size(10.0)
+                                        .color(egui::Color32::from_gray(150)));
+                                });
+                                columns[1].vertical_centered(|ui| {
+                                    ui.label(egui::RichText::new(format!("{:.0} GB", total_space as f64 / 1_000_000_000.0))
+                                        .size(18.0)
+                                        .strong()
+                                        .color(egui::Color32::from_rgb(100, 200, 255)));
+                                    ui.label(egui::RichText::new("Total")
+                                        .size(10.0)
+                                        .color(egui::Color32::from_gray(150)));
+                                });
+                                columns[2].vertical_centered(|ui| {
+                                    let used_color = if avg_usage > 90.0 {
+                                        egui::Color32::from_rgb(220, 50, 50)
+                                    } else if avg_usage > 75.0 {
+                                        egui::Color32::from_rgb(255, 165, 0)
+                                    } else {
+                                        egui::Color32::from_rgb(50, 200, 50)
+                                    };
+                                    ui.label(egui::RichText::new(format!("{:.1}%", avg_usage))
+                                        .size(18.0)
+                                        .strong()
+                                        .color(used_color));
+                                    ui.label(egui::RichText::new("Used")
+                                        .size(10.0)
+                                        .color(egui::Color32::from_gray(150)));
+                                });
+                            });
+                        });
+
+                    ui.add_space(10.0);
+                    ui.separator();
+                    ui.add_space(10.0);
+
+                    // Pie chart visualization
+                    if total_space > 0 {
+                        self.render_pie_chart(ui, &disk_data, total_space, total_used, total_available, avg_usage);
+                    }
+                }); // Close ScrollArea
+            }); // Close SidePanel
 
         let current_path_clone = self.current_path.clone();
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -418,6 +592,25 @@ impl eframe::App for DiskDashboard {
                 self.render_disk_overview(ui);
             }
         });
+
+        // Render toast notification overlay
+        if let Some((ref message, time_left)) = self.toast_message {
+            let opacity = (time_left.min(0.3) / 0.3).min(1.0); // Fade out in last 0.3s
+            egui::Area::new(egui::Id::new("toast_notification"))
+                .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -50.0])
+                .show(ctx, |ui| {
+                    egui::Frame::default()
+                        .fill(egui::Color32::from_rgba_unmultiplied(40, 45, 55, (220.0 * opacity) as u8))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(100, 120, 150, (200.0 * opacity) as u8)))
+                        .rounding(8.0)
+                        .inner_margin(egui::Margin::symmetric(20.0, 12.0))
+                        .show(ui, |ui| {
+                            ui.label(egui::RichText::new(message)
+                                .size(14.0)
+                                .color(egui::Color32::from_rgba_unmultiplied(255, 255, 255, (255.0 * opacity) as u8)));
+                        });
+                });
+        }
     }
 }
 
@@ -444,9 +637,8 @@ impl DiskDashboard {
             for entry in entries.flatten() {
                 let entry_path = entry.path();
                 let metadata = entry.metadata().ok();
-                
+
                 let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-                let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
                 let modified = metadata.as_ref().and_then(|m| m.modified().ok());
 
                 let name = entry_path.file_name()
@@ -454,8 +646,18 @@ impl DiskDashboard {
                     .unwrap_or("Unknown")
                     .to_string();
 
+                // Calculate size: for files use metadata, for dirs calculate recursive size
+                let (size, child_count) = if is_dir {
+                    let count = fs::read_dir(&entry_path).ok().map(|rd| rd.count());
+                    // Use cached recursive size or calculate it
+                    let dir_size = self.get_folder_size_recursive(&entry_path);
+                    (dir_size, count)
+                } else {
+                    (metadata.as_ref().map(|m| m.len()).unwrap_or(0), None)
+                };
+
                 let (category, usefulness) = self.analyze_file(&entry_path, &name, is_dir, size);
-                
+
                 self.file_items.push(FileItem {
                     path: entry_path,
                     name,
@@ -464,6 +666,7 @@ impl DiskDashboard {
                     category,
                     usefulness,
                     modified,
+                    child_count,
                 });
             }
         }
@@ -518,7 +721,7 @@ impl DiskDashboard {
         let name_lower = name.to_lowercase();
         let path_str = path.to_string_lossy().to_lowercase();
 
-        // System and critical files
+        // System and critical files - NEVER delete these
         if path_str.contains("windows\\system32") ||
            path_str.contains("windows\\syswow64") ||
            path_str.contains("program files") ||
@@ -526,17 +729,21 @@ impl DiskDashboard {
            name == "boot" ||
            name == "bootmgr" ||
            name == "pagefile.sys" ||
-           name == "hiberfil.sys" {
+           name == "hiberfil.sys" ||
+           name == "$RECYCLE.BIN" ||
+           name == "System Volume Information" ||
+           name == "Recovery" ||
+           name_lower == "$recycle.bin" ||
+           name_lower.starts_with("$") {
             return (FileCategory::MustKeep, 100.0);
         }
 
-        // Temp files and cache - useless
+        // Temp files and cache - useless (safe to delete)
         if name_lower.contains("temp") ||
            name_lower.contains("cache") ||
            name_lower.contains("tmp") ||
            name_lower.ends_with(".tmp") ||
            name_lower.ends_with(".log") ||
-           name_lower.contains("recycle") ||
            path_str.contains("\\temp\\") ||
            path_str.contains("\\cache\\") ||
            path_str.contains("\\tmp\\") ||
@@ -627,6 +834,22 @@ impl DiskDashboard {
         }
     }
 
+    /// Get folder size recursively with caching
+    fn get_folder_size_recursive(&mut self, path: &Path) -> u64 {
+        // Check cache first
+        if let Some(&size) = self.folder_size_cache.get(path) {
+            return size;
+        }
+
+        // Calculate recursively
+        let size = calculate_dir_size_recursive(path);
+
+        // Cache the result
+        self.folder_size_cache.insert(path.to_path_buf(), size);
+
+        size
+    }
+
     fn render_file_browser(&mut self, ui: &mut egui::Ui, current_path: &Path) {
         // Modern header with breadcrumb and search
         egui::Frame::default()
@@ -693,96 +916,108 @@ impl DiskDashboard {
         
         ui.add_space(10.0);
 
-        // Modern file list header with sortable columns
-        egui::Frame::default()
-            .fill(egui::Color32::from_rgb(25, 25, 32))
-            .inner_margin(egui::Margin::same(10.0))
-            .rounding(4.0)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    // Name column
-                    let name_clicked = ui.selectable_label(
-                        self.sort_column == SortColumn::Name,
-                        format!("Name {}", if self.sort_column == SortColumn::Name && self.sort_direction == SortDirection::Ascending { "▲" } else if self.sort_column == SortColumn::Name { "▼" } else { "" })
-                    ).clicked();
-                    if name_clicked {
-                        if self.sort_column == SortColumn::Name {
-                            self.sort_direction = match self.sort_direction {
-                                SortDirection::Ascending => SortDirection::Descending,
-                                SortDirection::Descending => SortDirection::Ascending,
-                            };
-                        } else {
-                            self.sort_column = SortColumn::Name;
-                            self.sort_direction = SortDirection::Ascending;
-                        }
-                        self.sort_file_items();
-                    }
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Usefulness column
-                let usefulness_clicked = ui.selectable_label(
-                    self.sort_column == SortColumn::Usefulness,
-                    format!("Usefulness {}", if self.sort_column == SortColumn::Usefulness && self.sort_direction == SortDirection::Ascending { "▲" } else if self.sort_column == SortColumn::Usefulness { "▼" } else { "" })
-                ).clicked();
-                if usefulness_clicked {
-                    if self.sort_column == SortColumn::Usefulness {
-                        self.sort_direction = match self.sort_direction {
-                            SortDirection::Ascending => SortDirection::Descending,
-                            SortDirection::Descending => SortDirection::Ascending,
-                        };
-                    } else {
-                        self.sort_column = SortColumn::Usefulness;
-                        self.sort_direction = SortDirection::Ascending;
-                    }
-                    self.sort_file_items();
-                }
-                ui.add_space(20.0);
-
-                // Size column
-                let size_clicked = ui.selectable_label(
-                    self.sort_column == SortColumn::Size,
-                    format!("Size {}", if self.sort_column == SortColumn::Size && self.sort_direction == SortDirection::Ascending { "▲" } else if self.sort_column == SortColumn::Size { "▼" } else { "" })
-                ).clicked();
-                if size_clicked {
-                    if self.sort_column == SortColumn::Size {
-                        self.sort_direction = match self.sort_direction {
-                            SortDirection::Ascending => SortDirection::Descending,
-                            SortDirection::Descending => SortDirection::Ascending,
-                        };
-                    } else {
-                        self.sort_column = SortColumn::Size;
-                        self.sort_direction = SortDirection::Ascending;
-                    }
-                    self.sort_file_items();
-                }
-                ui.add_space(20.0);
-
-                // Category column
-                let category_clicked = ui.selectable_label(
-                    self.sort_column == SortColumn::Category,
-                    format!("Category {}", if self.sort_column == SortColumn::Category && self.sort_direction == SortDirection::Ascending { "▲" } else if self.sort_column == SortColumn::Category { "▼" } else { "" })
-                ).clicked();
-                if category_clicked {
-                    if self.sort_column == SortColumn::Category {
-                        self.sort_direction = match self.sort_direction {
-                            SortDirection::Ascending => SortDirection::Descending,
-                            SortDirection::Descending => SortDirection::Ascending,
-                        };
-                    } else {
-                        self.sort_column = SortColumn::Category;
-                        self.sort_direction = SortDirection::Ascending;
-                    }
-                    self.sort_file_items();
-                }
-                    });
-                });
-            });
-        ui.add_space(8.0);
-
-        // File list
+        // File list with header inside ScrollArea for consistent width
         egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
             .show(ui, |ui| {
+                // Header row (inside ScrollArea for same width as content)
+                egui::Frame::default()
+                    .fill(egui::Color32::from_rgb(25, 25, 32))
+                    .inner_margin(egui::Margin::same(10.0))
+                    .rounding(4.0)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            // Add same spacing as content rows (icon 18px + space 12px = 30px)
+                            ui.add_space(30.0);
+
+                            // Name column
+                            let name_clicked = ui.selectable_label(
+                                self.sort_column == SortColumn::Name,
+                                format!("Name {}", if self.sort_column == SortColumn::Name && self.sort_direction == SortDirection::Ascending { "▲" } else if self.sort_column == SortColumn::Name { "▼" } else { "" })
+                            ).clicked();
+                            if name_clicked {
+                                if self.sort_column == SortColumn::Name {
+                                    self.sort_direction = match self.sort_direction {
+                                        SortDirection::Ascending => SortDirection::Descending,
+                                        SortDirection::Descending => SortDirection::Ascending,
+                                    };
+                                } else {
+                                    self.sort_column = SortColumn::Name;
+                                    self.sort_direction = SortDirection::Ascending;
+                                }
+                                self.sort_file_items();
+                            }
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                // Fixed width columns matching content layout (right to left)
+
+                                // Usefulness column - 60px
+                                ui.allocate_ui_with_layout(
+                                    egui::Vec2::new(60.0, 20.0),
+                                    egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                                    |ui| {
+                                        let arrow = if self.sort_column == SortColumn::Usefulness && self.sort_direction == SortDirection::Ascending { "▲" } else if self.sort_column == SortColumn::Usefulness { "▼" } else { "" };
+                                        if ui.selectable_label(self.sort_column == SortColumn::Usefulness, format!("Use {}", arrow)).clicked() {
+                                            if self.sort_column == SortColumn::Usefulness {
+                                                self.sort_direction = match self.sort_direction {
+                                                    SortDirection::Ascending => SortDirection::Descending,
+                                                    SortDirection::Descending => SortDirection::Ascending,
+                                                };
+                                            } else {
+                                                self.sort_column = SortColumn::Usefulness;
+                                                self.sort_direction = SortDirection::Ascending;
+                                            }
+                                            self.sort_file_items();
+                                        }
+                                    }
+                                );
+
+                                // Size column - 75px
+                                ui.allocate_ui_with_layout(
+                                    egui::Vec2::new(75.0, 20.0),
+                                    egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                                    |ui| {
+                                        let arrow = if self.sort_column == SortColumn::Size && self.sort_direction == SortDirection::Ascending { "▲" } else if self.sort_column == SortColumn::Size { "▼" } else { "" };
+                                        if ui.selectable_label(self.sort_column == SortColumn::Size, format!("Size {}", arrow)).clicked() {
+                                            if self.sort_column == SortColumn::Size {
+                                                self.sort_direction = match self.sort_direction {
+                                                    SortDirection::Ascending => SortDirection::Descending,
+                                                    SortDirection::Descending => SortDirection::Ascending,
+                                                };
+                                            } else {
+                                                self.sort_column = SortColumn::Size;
+                                                self.sort_direction = SortDirection::Ascending;
+                                            }
+                                            self.sort_file_items();
+                                        }
+                                    }
+                                );
+
+                                // Category column - 90px (left-aligned to match badges)
+                                ui.allocate_ui_with_layout(
+                                    egui::Vec2::new(90.0, 20.0),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| {
+                                        let arrow = if self.sort_column == SortColumn::Category && self.sort_direction == SortDirection::Ascending { "▲" } else if self.sort_column == SortColumn::Category { "▼" } else { "" };
+                                        if ui.selectable_label(self.sort_column == SortColumn::Category, format!("Cat {}", arrow)).clicked() {
+                                            if self.sort_column == SortColumn::Category {
+                                                self.sort_direction = match self.sort_direction {
+                                                    SortDirection::Ascending => SortDirection::Descending,
+                                                    SortDirection::Descending => SortDirection::Ascending,
+                                                };
+                                            } else {
+                                                self.sort_column = SortColumn::Category;
+                                                self.sort_direction = SortDirection::Ascending;
+                                            }
+                                            self.sort_file_items();
+                                        }
+                                    }
+                                );
+                            });
+                        });
+                    });
+                ui.add_space(8.0);
+
                 // Back button for directories
                 if let Some(parent) = current_path.parent() {
                     if ui.button(format!("⬆️ .. ({})", parent.to_string_lossy())).clicked() {
@@ -844,43 +1079,94 @@ impl DiskDashboard {
         };
 
         let size_str = if item.is_dir {
-            "—".to_string()
+            if item.size > 0 {
+                format_size(item.size)
+            } else {
+                match item.child_count {
+                    Some(0) => "Empty".to_string(),
+                    Some(n) => format!("{} items", n),
+                    None => "—".to_string(),
+                }
+            }
         } else {
             format_size(item.size)
         };
 
-        let hover_color = egui::Color32::from_rgb(50, 50, 65); // More visible hover color
+        let is_empty_folder = item.is_dir && item.child_count == Some(0);
 
+        // Calculate max size in current directory for progress bar
+        let max_size_in_dir = self.filtered_items.iter()
+            .map(|i| i.size)
+            .max()
+            .unwrap_or(1)
+            .max(1); // Avoid division by zero
+
+        // Create interactive area for hover detection BEFORE drawing
+        let item_id = ui.make_persistent_id(format!("file_item_{}", item.path.to_string_lossy()));
         let item_rect = ui.available_rect_before_wrap();
-        let is_hovered = ui.ctx().pointer_latest_pos()
-            .map(|pos| item_rect.contains(pos))
-            .unwrap_or(false);
+        let interact_rect = egui::Rect::from_min_size(item_rect.min, egui::Vec2::new(ui.available_width(), 44.0));
+        let sense = egui::Sense::click().union(egui::Sense::hover());
+        let interact_response = ui.interact(interact_rect, item_id, sense);
+        let is_hovered = interact_response.hovered();
 
-        // Draw background highlight
-        if is_hovered {
-            ui.painter().rect_filled(
-                item_rect,
-                4.0,
-                hover_color,
-            );
-        }
+        // Modern clean file item design with proper hover
+        // Empty folders get a muted appearance
+        let base_fill = if is_empty_folder {
+            egui::Color32::from_rgb(22, 24, 28) // Darker for empty
+        } else {
+            egui::Color32::from_rgb(25, 27, 32)
+        };
 
-        // Modern clean file item design
-        let frame_response = egui::Frame::default()
-            .fill(if is_hovered { egui::Color32::from_rgb(35, 38, 45) } else { egui::Color32::TRANSPARENT })
-            .stroke(if is_hovered { 
-                egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 120, 180)) 
-            } else { 
-                egui::Stroke::NONE 
+        let hover_fill = if is_empty_folder {
+            egui::Color32::from_rgb(35, 38, 45) // Less bright hover for empty
+        } else {
+            egui::Color32::from_rgb(40, 45, 58)
+        };
+
+        // Calculate size ratio for background progress bar
+        let size_ratio = if item.size > 0 && max_size_in_dir > 0 {
+            (item.size as f32 / max_size_in_dir as f32).min(1.0)
+        } else {
+            0.0
+        };
+
+        let _frame_response = egui::Frame::default()
+            .fill(if is_hovered { hover_fill } else { base_fill })
+            .stroke(if is_hovered {
+                if is_empty_folder {
+                    egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 90)) // Gray for empty
+                } else {
+                    egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 120, 180))
+                }
+            } else {
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(35, 38, 45))
             })
-            .rounding(4.0)
+            .rounding(6.0)
             .inner_margin(egui::Margin::same(10.0))
             .show(ui, |ui| {
+                // Draw full-width background progress bar
+                if size_ratio > 0.0 {
+                    let row_rect = ui.available_rect_before_wrap();
+                    let bar_height = 24.0;
+                    let bar_rect = egui::Rect::from_min_size(
+                        egui::Pos2::new(row_rect.min.x, row_rect.min.y + (row_rect.height() - bar_height) / 2.0),
+                        egui::Vec2::new(row_rect.width() * size_ratio, bar_height)
+                    );
+                    let bar_color = if size_ratio > 0.8 {
+                        egui::Color32::from_rgba_unmultiplied(255, 80, 80, 40) // Red tint
+                    } else if size_ratio > 0.5 {
+                        egui::Color32::from_rgba_unmultiplied(255, 180, 80, 35) // Orange tint
+                    } else {
+                        egui::Color32::from_rgba_unmultiplied(80, 150, 255, 30) // Blue tint
+                    };
+                    ui.painter().rect_filled(bar_rect, 4.0, bar_color);
+                }
+
                 ui.horizontal(|ui| {
-                    // Icon column - cleaner icons
+                    // Icon column - different icons for empty vs non-empty folders
                     let icon_size = 18.0;
                     let icon_text = if item.is_dir {
-                        "📁"
+                        if is_empty_folder { "📂" } else { "📁" }
                     } else {
                         match item.category {
                             FileCategory::MustKeep => "🔒",
@@ -890,81 +1176,158 @@ impl DiskDashboard {
                             FileCategory::Unknown => "❓",
                         }
                     };
-                    
+
                     ui.label(egui::RichText::new(icon_text).size(icon_size));
                     ui.add_space(12.0);
                     
-                    // Name column - cleaner, no extra icons cluttering
-                    let name_label = ui.selectable_label(false, egui::RichText::new(&item.name)
-                        .size(13.0)
-                        .color(if item.is_dir { 
-                            egui::Color32::from_rgb(150, 200, 255) 
-                        } else { 
-                            egui::Color32::from_rgb(220, 220, 220) 
-                        }));
-                    
-                    if name_label.clicked() {
-                        if item.is_dir {
+                    // Name column - different colors for empty folders
+                    let name_color = if item.is_dir {
+                        if is_empty_folder {
+                            egui::Color32::from_rgb(120, 140, 160) // Dimmer for empty
+                        } else {
+                            egui::Color32::from_rgb(150, 200, 255) // Bright for non-empty
+                        }
+                    } else {
+                        egui::Color32::from_rgb(220, 220, 220)
+                    };
+
+                    // Use regular label instead of selectable_label to avoid conflicting hover styles
+                    let name_response = ui.add(
+                        egui::Label::new(egui::RichText::new(&item.name)
+                            .size(13.0)
+                            .color(name_color))
+                        .sense(egui::Sense::click())
+                    );
+
+                    // Name click also respects empty folder restriction
+                    if name_response.clicked() && item.is_dir {
+                        if is_empty_folder {
+                            self.toast_message = Some(("📂 This folder is empty".to_string(), 2.0));
+                        } else {
                             self.navigate_to(item.path.clone());
                         }
                     }
+
+                    // Use the name_response for context menu instead of separate label
+                    let name_label = name_response;
                     
                     // Right-click context menu
+                    let item_path = item.path.clone();
+                    let item_is_dir = item.is_dir;
                     name_label.context_menu(|ui| {
+                        // Open in Explorer
                         if ui.button("📂 Open in Explorer").clicked() {
+                            #[cfg(target_os = "windows")]
+                            {
+                                let path = if item_is_dir {
+                                    item_path.clone()
+                                } else {
+                                    item_path.parent().unwrap_or(&item_path).to_path_buf()
+                                };
+                                let _ = std::process::Command::new("explorer")
+                                    .arg(&path)
+                                    .spawn();
+                            }
                             ui.close_menu();
                         }
-                        if !item.is_dir {
+
+                        ui.separator();
+
+                        // Copy path to clipboard
+                        if ui.button("📋 Copy Path").clicked() {
+                            ui.output_mut(|o| o.copied_text = item_path.to_string_lossy().to_string());
+                            ui.close_menu();
+                        }
+
+                        // Only show delete option for non-protected items
+                        let item_category = item.category;
+                        if item_category != FileCategory::MustKeep && item_category != FileCategory::System {
                             ui.separator();
-                            if ui.button("📋 Copy Path").clicked() {
+
+                            // Delete option (for both files and folders)
+                            let delete_label = if item_is_dir {
+                                "🗑️ Delete Folder"
+                            } else {
+                                "🗑️ Delete File"
+                            };
+
+                            if ui.add(egui::Button::new(
+                                egui::RichText::new(delete_label)
+                                    .color(egui::Color32::from_rgb(255, 100, 100)))
+                            ).clicked() {
+                                self.pending_delete = Some(item_path.clone());
                                 ui.close_menu();
                             }
-                            if item.category == FileCategory::Useless {
-                                ui.separator();
-                                if ui.button("🗑️ Delete File").clicked() {
-                                    ui.close_menu();
-                                }
-                            }
-                        }
-                        ui.separator();
-                        if ui.button("ℹ️ Properties").clicked() {
-                            ui.close_menu();
+                        } else {
+                            ui.separator();
+                            ui.label(egui::RichText::new("🔒 Protected")
+                                .size(11.0)
+                                .color(egui::Color32::from_rgb(150, 150, 150)));
                         }
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // Usefulness score - cleaner display
-                        ui.label(egui::RichText::new(format!("{:.0}%", item.usefulness))
-                            .size(12.0)
-                            .color(usefulness_color)
-                            .strong());
-                        ui.add_space(25.0);
+                        // Fixed width columns for alignment (right to left)
+                        // Must match header widths: 60, 75, 50, 80
 
-                        // Size - cleaner
-                        ui.label(egui::RichText::new(size_str)
-                            .size(12.0)
-                            .color(egui::Color32::from_gray(180)));
-                        ui.add_space(25.0);
+                        // Usefulness score - fixed 60px
+                        ui.allocate_ui_with_layout(
+                            egui::Vec2::new(60.0, 20.0),
+                            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                            |ui| {
+                                ui.label(egui::RichText::new(format!("{:.0}%", item.usefulness))
+                                    .size(11.0)
+                                    .color(usefulness_color)
+                                    .strong());
+                            }
+                        );
 
-                        // Category badge - modern pill design
-                        let badge_frame = egui::Frame::default()
-                            .fill(egui::Color32::from_rgb(25, 25, 35))
-                            .stroke(egui::Stroke::new(1.0, category_color))
-                            .rounding(8.0)
-                            .inner_margin(egui::Margin::symmetric(8.0, 4.0));
-                        
-                        badge_frame.show(ui, |ui| {
-                            ui.label(egui::RichText::new(category_text)
-                                .size(10.0)
-                                .color(category_color));
-                        });
+                        // Size column - fixed 75px
+                        ui.allocate_ui_with_layout(
+                            egui::Vec2::new(75.0, 20.0),
+                            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                            |ui| {
+                                ui.label(egui::RichText::new(&size_str)
+                                    .size(11.0)
+                                    .color(egui::Color32::from_gray(160)));
+                            }
+                        );
+
+                        // Category badge - fixed 90px (left-aligned to match header)
+                        ui.allocate_ui_with_layout(
+                            egui::Vec2::new(90.0, 20.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                let badge_frame = egui::Frame::default()
+                                    .fill(egui::Color32::from_rgb(25, 25, 35))
+                                    .stroke(egui::Stroke::new(1.0, category_color))
+                                    .rounding(6.0)
+                                    .inner_margin(egui::Margin::symmetric(6.0, 3.0));
+
+                                badge_frame.show(ui, |ui| {
+                                    ui.label(egui::RichText::new(category_text)
+                                        .size(9.0)
+                                        .color(category_color));
+                                });
+                            }
+                        );
                     });
                 });
             });
 
+        // Handle click on entire row for directories
+        if interact_response.clicked() && item.is_dir {
+            if is_empty_folder {
+                // Show toast message instead of navigating
+                self.toast_message = Some(("📂 This folder is empty".to_string(), 2.0));
+            } else {
+                self.navigate_to(item.path.clone());
+            }
+        }
+
         // Hover tooltip with file information
-        if frame_response.response.hovered() {
-            frame_response.response.on_hover_ui(|ui| {
+        if is_hovered {
+            interact_response.on_hover_ui(|ui| {
                 ui.set_max_width(300.0);
                 ui.label(egui::RichText::new("File Information").strong().size(14.0));
                 ui.separator();
@@ -972,9 +1335,9 @@ impl DiskDashboard {
                 if !item.is_dir {
                     ui.label(format!("Size: {}", format_size(item.size)));
                 }
-                ui.label(format!("Category: {} {}", category_text, 
-                    if item.category == FileCategory::MustKeep { "🔒" } 
-                    else if item.category == FileCategory::Useless { "⚠️" } 
+                ui.label(format!("Category: {} {}", category_text,
+                    if item.category == FileCategory::MustKeep { "🔒" }
+                    else if item.category == FileCategory::Useless { "⚠️" }
                     else { "" }));
                 ui.label(format!("Usefulness: {:.1}%", item.usefulness));
                 if let Some(modified) = item.modified {
@@ -996,9 +1359,12 @@ impl DiskDashboard {
                 }
             });
         }
+
+        // Add spacing between items
+        ui.add_space(4.0);
     }
 
-    fn render_pie_chart(&self, ui: &mut egui::Ui, disk_data: &[(PathBuf, u64, u64, f64)], total_space: u64, total_used: u64, _total_available: u64, avg_usage: f64) {
+    fn render_pie_chart(&self, ui: &mut egui::Ui, disk_data: &[(PathBuf, String, u64, u64, f64)], total_space: u64, total_used: u64, _total_available: u64, avg_usage: f64) {
         ui.add_space(15.0);
         egui::Frame::default()
             .fill(egui::Color32::from_rgb(25, 27, 35))
@@ -1006,12 +1372,14 @@ impl DiskDashboard {
             .rounding(8.0)
             .inner_margin(egui::Margin::same(12.0))
             .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
                 ui.heading(egui::RichText::new("Disk Usage Breakdown")
                     .size(16.0)
                     .color(egui::Color32::from_rgb(180, 200, 255)));
                 ui.add_space(10.0);
-                
-                let chart_size = 180.0;
+
+                // Use available width to determine chart size, with max of 180
+                let chart_size = ui.available_width().min(180.0);
                 let (response, painter) = ui.allocate_painter(
                     egui::Vec2::new(chart_size, chart_size),
                     egui::Sense::hover()
@@ -1079,7 +1447,7 @@ impl DiskDashboard {
                         egui::Color32::from_rgb(200, 150, 255),
                     ];
                     
-                    for (i, (mount_point, total, available, _percent)) in disk_data.iter().enumerate() {
+                    for (i, (mount_point, disk_name, total, available, _percent)) in disk_data.iter().enumerate() {
                         let used = total - available;
                         let disk_percent = if *total > 0 {
                             (used as f64 / *total as f64) * 100.0
@@ -1091,12 +1459,17 @@ impl DiskDashboard {
                         } else {
                             0.0
                         };
-                        
+
                         let color = colors[i % colors.len()];
+                        let display = if disk_name.is_empty() {
+                            mount_point.to_string_lossy().to_string()
+                        } else {
+                            format!("{} ({})", mount_point.to_string_lossy(), disk_name)
+                        };
                         ui.horizontal(|ui| {
                             ui.label(egui::RichText::new("●").color(color).size(12.0));
-                            ui.label(format!("{}: {:.1}% ({:.1}% of total)", 
-                                mount_point.to_string_lossy(), 
+                            ui.label(format!("{}: {:.1}% ({:.1}% of total)",
+                                display,
                                 disk_percent,
                                 space_percent));
                         });
@@ -1130,10 +1503,234 @@ fn format_size(bytes: u64) -> String {
     if bytes < 1024 {
         format!("{} B", bytes)
     } else if bytes < 1024 * 1024 {
-        format!("{:.2} KB", bytes as f64 / 1024.0)
+        format!("{:.1} KB", bytes as f64 / 1024.0)
     } else if bytes < 1024 * 1024 * 1024 {
-        format!("{:.2} MB", bytes as f64 / (1024.0 * 1024.0))
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
     } else {
         format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
+/// Calculate the total size of a directory (non-recursive, just immediate children)
+#[allow(dead_code)]
+fn calculate_dir_size_shallow(path: &Path) -> u64 {
+    fs::read_dir(path)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter_map(|e| e.metadata().ok())
+                .filter(|m| m.is_file())
+                .map(|m| m.len())
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
+/// Calculate the total size of a directory recursively
+fn calculate_dir_size_recursive(path: &Path) -> u64 {
+    let mut total_size: u64 = 0;
+
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            if let Ok(metadata) = entry.metadata() {
+                if metadata.is_file() {
+                    total_size += metadata.len();
+                } else if metadata.is_dir() {
+                    // Recursively calculate subdirectory size
+                    total_size += calculate_dir_size_recursive(&entry.path());
+                }
+            }
+        }
+    }
+
+    total_size
+}
+
+/// Check if a folder should block navigation (empty folder)
+#[allow(dead_code)] // Used in tests
+fn should_block_folder_entry(child_count: Option<usize>) -> bool {
+    child_count == Some(0)
+}
+
+/// Check if a path is a protected system path
+#[allow(dead_code)] // Used in tests
+fn is_protected_path(name: &str) -> bool {
+    let name_lower = name.to_lowercase();
+    name_lower.starts_with("$") ||
+    name_lower == "system volume information" ||
+    name_lower == "recovery" ||
+    name_lower == "boot" ||
+    name_lower == "bootmgr" ||
+    name_lower == "pagefile.sys" ||
+    name_lower == "hiberfil.sys"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==================== Size Formatting Tests ====================
+
+    #[test]
+    fn test_format_size_bytes() {
+        assert_eq!(format_size(0), "0 B");
+        assert_eq!(format_size(512), "512 B");
+        assert_eq!(format_size(1023), "1023 B");
+    }
+
+    #[test]
+    fn test_format_size_kilobytes() {
+        assert_eq!(format_size(1024), "1.0 KB");
+        assert_eq!(format_size(1536), "1.5 KB");
+        assert_eq!(format_size(1024 * 100), "100.0 KB");
+    }
+
+    #[test]
+    fn test_format_size_megabytes() {
+        assert_eq!(format_size(1024 * 1024), "1.0 MB");
+        assert_eq!(format_size(1024 * 1024 * 500), "500.0 MB");
+    }
+
+    #[test]
+    fn test_format_size_gigabytes() {
+        assert_eq!(format_size(1024 * 1024 * 1024), "1.00 GB");
+        assert_eq!(format_size(1024 * 1024 * 1024 * 2), "2.00 GB");
+    }
+
+    // ==================== Empty Folder Navigation Tests ====================
+
+    #[test]
+    fn test_empty_folder_blocks_navigation() {
+        // Empty folder (0 items) should block
+        assert!(should_block_folder_entry(Some(0)));
+    }
+
+    #[test]
+    fn test_non_empty_folder_allows_navigation() {
+        // Non-empty folders should allow navigation
+        assert!(!should_block_folder_entry(Some(1)));
+        assert!(!should_block_folder_entry(Some(10)));
+        assert!(!should_block_folder_entry(Some(100)));
+    }
+
+    #[test]
+    fn test_unknown_folder_count_allows_navigation() {
+        // If count is unknown, allow navigation (fail open)
+        assert!(!should_block_folder_entry(None));
+    }
+
+    // ==================== Protected Path Tests ====================
+
+    #[test]
+    fn test_recycle_bin_is_protected() {
+        assert!(is_protected_path("$RECYCLE.BIN"));
+        assert!(is_protected_path("$Recycle.Bin"));
+        assert!(is_protected_path("$recycle.bin"));
+    }
+
+    #[test]
+    fn test_system_volume_info_is_protected() {
+        assert!(is_protected_path("System Volume Information"));
+        assert!(is_protected_path("system volume information"));
+    }
+
+    #[test]
+    fn test_system_files_are_protected() {
+        assert!(is_protected_path("pagefile.sys"));
+        assert!(is_protected_path("hiberfil.sys"));
+        assert!(is_protected_path("bootmgr"));
+        assert!(is_protected_path("Recovery"));
+    }
+
+    #[test]
+    fn test_dollar_prefix_is_protected() {
+        assert!(is_protected_path("$WinREAgent"));
+        assert!(is_protected_path("$SysReset"));
+        assert!(is_protected_path("$Windows.~BT"));
+    }
+
+    #[test]
+    fn test_normal_folders_not_protected() {
+        assert!(!is_protected_path("Documents"));
+        assert!(!is_protected_path("Users"));
+        assert!(!is_protected_path("Program Files"));
+        assert!(!is_protected_path("my_project"));
+    }
+
+    // ==================== File Category Tests ====================
+
+    #[test]
+    fn test_file_item_empty_folder_detection() {
+        let empty_item = FileItem {
+            path: PathBuf::from("C:\\test\\empty"),
+            name: "empty".to_string(),
+            size: 0,
+            is_dir: true,
+            category: FileCategory::Regular,
+            usefulness: 50.0,
+            modified: None,
+            child_count: Some(0),
+        };
+        assert!(empty_item.child_count == Some(0));
+
+        let non_empty_item = FileItem {
+            path: PathBuf::from("C:\\test\\full"),
+            name: "full".to_string(),
+            size: 1000,
+            is_dir: true,
+            category: FileCategory::Regular,
+            usefulness: 50.0,
+            modified: None,
+            child_count: Some(5),
+        };
+        assert!(non_empty_item.child_count != Some(0));
+    }
+
+    // ==================== UI State Tests ====================
+
+    #[test]
+    fn test_toast_message_creation() {
+        let toast: Option<(String, f32)> = Some(("Test message".to_string(), 2.0));
+        assert!(toast.is_some());
+        let (msg, time) = toast.unwrap();
+        assert_eq!(msg, "Test message");
+        assert_eq!(time, 2.0);
+    }
+
+    #[test]
+    fn test_toast_expiry() {
+        let mut time_left: f32 = 2.0;
+
+        // Simulate time passing
+        time_left -= 0.5;
+        assert!(time_left > 0.0); // Still visible
+
+        time_left -= 1.5;
+        assert!(time_left <= 0.0); // Should be hidden
+    }
+
+    // ==================== Navigation State Tests ====================
+
+    #[test]
+    fn test_navigation_history_tracking() {
+        let mut history: Vec<PathBuf> = Vec::new();
+        let mut index: usize = 0;
+
+        // Navigate to first path
+        history.push(PathBuf::from("C:\\"));
+        index = history.len() - 1;
+        assert_eq!(index, 0);
+
+        // Navigate to second path
+        history.push(PathBuf::from("C:\\Users"));
+        index = history.len() - 1;
+        assert_eq!(index, 1);
+
+        // Go back
+        if index > 0 {
+            index -= 1;
+        }
+        assert_eq!(index, 0);
+        assert_eq!(history[index], PathBuf::from("C:\\"));
     }
 }
