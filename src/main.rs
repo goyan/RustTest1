@@ -1076,8 +1076,9 @@ impl DiskDashboard {
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 // Fixed width columns matching content layout (right to left)
+                                // Order: Use | Cat | Size (Size is leftmost, most important)
 
-                                // Usefulness column - 60px
+                                // Usefulness column - 60px (rightmost)
                                 ui.allocate_ui_with_layout(
                                     egui::Vec2::new(60.0, 20.0),
                                     egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
@@ -1098,28 +1099,7 @@ impl DiskDashboard {
                                     }
                                 );
 
-                                // Size column - 75px
-                                ui.allocate_ui_with_layout(
-                                    egui::Vec2::new(75.0, 20.0),
-                                    egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                                    |ui| {
-                                        let arrow = if self.sort_column == SortColumn::Size && self.sort_direction == SortDirection::Ascending { "▲" } else if self.sort_column == SortColumn::Size { "▼" } else { "" };
-                                        if ui.selectable_label(self.sort_column == SortColumn::Size, format!("Size {}", arrow)).clicked() {
-                                            if self.sort_column == SortColumn::Size {
-                                                self.sort_direction = match self.sort_direction {
-                                                    SortDirection::Ascending => SortDirection::Descending,
-                                                    SortDirection::Descending => SortDirection::Ascending,
-                                                };
-                                            } else {
-                                                self.sort_column = SortColumn::Size;
-                                                self.sort_direction = SortDirection::Ascending;
-                                            }
-                                            self.sort_file_items();
-                                        }
-                                    }
-                                );
-
-                                // Category column - 90px (left-aligned to match badges)
+                                // Category column - 90px (middle)
                                 ui.allocate_ui_with_layout(
                                     egui::Vec2::new(90.0, 20.0),
                                     egui::Layout::left_to_right(egui::Align::Center),
@@ -1133,6 +1113,27 @@ impl DiskDashboard {
                                                 };
                                             } else {
                                                 self.sort_column = SortColumn::Category;
+                                                self.sort_direction = SortDirection::Ascending;
+                                            }
+                                            self.sort_file_items();
+                                        }
+                                    }
+                                );
+
+                                // Size column - 75px (leftmost, most important)
+                                ui.allocate_ui_with_layout(
+                                    egui::Vec2::new(75.0, 20.0),
+                                    egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                                    |ui| {
+                                        let arrow = if self.sort_column == SortColumn::Size && self.sort_direction == SortDirection::Ascending { "▲" } else if self.sort_column == SortColumn::Size { "▼" } else { "" };
+                                        if ui.selectable_label(self.sort_column == SortColumn::Size, format!("Size {}", arrow)).clicked() {
+                                            if self.sort_column == SortColumn::Size {
+                                                self.sort_direction = match self.sort_direction {
+                                                    SortDirection::Ascending => SortDirection::Descending,
+                                                    SortDirection::Descending => SortDirection::Ascending,
+                                                };
+                                            } else {
+                                                self.sort_column = SortColumn::Size;
                                                 self.sort_direction = SortDirection::Ascending;
                                             }
                                             self.sort_file_items();
@@ -1418,9 +1419,9 @@ impl DiskDashboard {
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // Fixed width columns for alignment (right to left)
-                        // Must match header widths: 60, 75, 50, 80
+                        // Order: Use | Cat | Size (Size is leftmost, most important)
 
-                        // Usefulness score - fixed 60px
+                        // Usefulness score - fixed 60px (rightmost)
                         ui.allocate_ui_with_layout(
                             egui::Vec2::new(60.0, 20.0),
                             egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
@@ -1432,18 +1433,7 @@ impl DiskDashboard {
                             }
                         );
 
-                        // Size column - fixed 75px
-                        ui.allocate_ui_with_layout(
-                            egui::Vec2::new(75.0, 20.0),
-                            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                            |ui| {
-                                ui.label(egui::RichText::new(&size_str)
-                                    .size(11.0)
-                                    .color(egui::Color32::from_gray(160)));
-                            }
-                        );
-
-                        // Category badge - fixed 90px (left-aligned to match header)
+                        // Category badge - fixed 90px (middle)
                         ui.allocate_ui_with_layout(
                             egui::Vec2::new(90.0, 20.0),
                             egui::Layout::left_to_right(egui::Align::Center),
@@ -1459,6 +1449,17 @@ impl DiskDashboard {
                                         .size(9.0)
                                         .color(category_color));
                                 });
+                            }
+                        );
+
+                        // Size column - fixed 75px (leftmost, most important)
+                        ui.allocate_ui_with_layout(
+                            egui::Vec2::new(75.0, 20.0),
+                            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                            |ui| {
+                                ui.label(egui::RichText::new(&size_str)
+                                    .size(11.0)
+                                    .color(egui::Color32::from_gray(160)));
                             }
                         );
                     });
