@@ -326,6 +326,13 @@ impl eframe::App for DiskDashboard {
                                         Ok(_) => {
                                             self.delete_error = None;
                                             self.needs_refresh = true;
+                                            // Invalidate size cache for parent and ancestors
+                                            let mut ancestor = path_to_delete.parent();
+                                            while let Some(parent) = ancestor {
+                                                self.folder_size_cache.remove(parent);
+                                                self.pending_size_calculations.remove(parent);
+                                                ancestor = parent.parent();
+                                            }
                                         }
                                         Err(e) => {
                                             self.delete_error = Some(format!("Failed to delete: {}", e));
