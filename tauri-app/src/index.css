@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --cyber-bg: #12101a;
+  --cyber-panel: #191b23;
+  --cyber-card: #1c1e26;
+  --cyber-card-hover: #262a37;
+  --cyber-cyan: #00ffff;
+  --cyber-magenta: #ff00ff;
+  --cyber-neon-green: #00ff88;
+  --cyber-neon-red: #ff3366;
+  --cyber-neon-orange: #ff8800;
+  --cyber-purple: #5000c8;
+  --cyber-dim-purple: #786496;
+  --cyber-light-purple: #c8b4ff;
+  --cyber-electric-blue: #00d4ff;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--cyber-bg);
+  color: white;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  overflow: hidden;
+  height: 100vh;
+}
+
+#root {
+  height: 100vh;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--cyber-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3c2860;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--cyber-cyan);
+}
+
+/* Toast animation */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes toast-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(20px); }
+}
