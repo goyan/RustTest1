@@ -8,13 +8,6 @@
     "core:window:default",
     "core:window:allow-close",
     "core:window:allow-set-title",
-    {
-      "identifier": "fs:default",
-      "allow": [{ "path": "**" }]
-    },
-    "fs:allow-read-dir",
-    "fs:allow-read-file",
-    "fs:allow-remove",
     "shell:allow-open"
   ]
 }

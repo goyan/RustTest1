@@ -48,28 +48,60 @@ export function PieChart({ disks, totalSpace, totalUsed, avgUsage }: PieChartPro
   const diskColors = ["#6496ff", "#ff9664", "#96ff96", "#ffc864", "#c896ff"];
 
   return (
-    <div className="p-3 rounded-lg bg-cyber-panel border border-[#323741]">
-      <h3 className="text-base font-semibold text-[#b4c8ff] mb-2.5">Disk Usage Breakdown</h3>
+    <div className="p-4 rounded-xl glass border border-white/[0.06] animate-fade-in">
+      <div className="flex items-center gap-2 mb-3">
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Usage Breakdown</h3>
+        <div className="flex-1 h-px bg-gradient-to-r from-white/10 to-transparent" />
+      </div>
 
-      <svg width={size} height={size} className="mx-auto block">
-        <polygon points={usedPath} fill={usedColor} />
-        <polygon points={freePath} fill="#32c832" />
+      {/* SVG Chart with glow filter */}
+      <svg width={size} height={size} className="mx-auto block drop-shadow-lg">
+        <defs>
+          <filter id="chartGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="3" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <radialGradient id="centerGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor={usedColor} stopOpacity="0.08" />
+            <stop offset="100%" stopColor="transparent" stopOpacity="0" />
+          </radialGradient>
+        </defs>
+
+        {/* Subtle center glow */}
+        <circle cx={center} cy={center} r={radius * 1.1} fill="url(#centerGlow)" />
+
+        {/* Chart segments */}
+        <polygon points={usedPath} fill={usedColor} opacity="0.85" filter="url(#chartGlow)" />
+        <polygon points={freePath} fill="#32c832" opacity="0.65" />
+
+        {/* Center label */}
+        <text x={center} y={center - 4} textAnchor="middle" fill="white" fontSize="16" fontWeight="bold" opacity="0.9">
+          {avgUsage.toFixed(0)}%
+        </text>
+        <text x={center} y={center + 12} textAnchor="middle" fill="#786496" fontSize="9" letterSpacing="1">
+          USED
+        </text>
       </svg>
 
-      <div className="flex items-center gap-4 mt-2.5 text-sm justify-center">
-        <div className="flex items-center gap-1">
-          <span style={{ color: usedColor }} className="text-base">●</span>
-          Used: {avgUsage.toFixed(1)}%
+      {/* Legend */}
+      <div className="flex items-center gap-5 mt-3 text-xs justify-center">
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: usedColor, boxShadow: `0 0 6px ${usedColor}40` }} />
+          <span className="text-gray-400">Used {avgUsage.toFixed(1)}%</span>
         </div>
-        <div className="flex items-center gap-1">
-          <span style={{ color: "#32c832" }} className="text-base">●</span>
-          Available: {(100 - avgUsage).toFixed(1)}%
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-2 rounded-full bg-[#32c832]" style={{ boxShadow: "0 0 6px rgba(50, 200, 50, 0.3)" }} />
+          <span className="text-gray-400">Free {(100 - avgUsage).toFixed(1)}%</span>
         </div>
       </div>
 
+      {/* Per-disk breakdown */}
       {disks.length > 1 && (
-        <div className="mt-2.5 pt-2 border-t border-[#323741]">
-          <p className="font-semibold text-sm mb-1">By Disk:</p>
+        <div className="mt-3 pt-3 border-t border-white/[0.06]">
+          <p className="font-semibold text-[11px] text-gray-500 uppercase tracking-wider mb-2">By Disk</p>
           {disks.map((disk, i) => {
             const diskPercent = disk.total_space > 0
               ? (disk.used_space / disk.total_space) * 100
@@ -83,9 +115,12 @@ export function PieChart({ disks, totalSpace, totalUsed, avgUsage }: PieChartPro
               : disk.mount_point;
 
             return (
-              <div key={disk.mount_point} className="flex items-center gap-1 text-xs">
-                <span style={{ color }} className="text-xs">●</span>
-                {display}: {diskPercent.toFixed(1)}% ({spacePercent.toFixed(1)}% of total)
+              <div key={disk.mount_point} className="flex items-center gap-2 text-[11px] py-0.5">
+                <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                <span className="text-gray-400 truncate">{display}</span>
+                <span className="text-gray-500 ml-auto flex-shrink-0 font-mono text-[10px]">
+                  {diskPercent.toFixed(1)}% ({spacePercent.toFixed(0)}%)
+                </span>
               </div>
             );
           })}

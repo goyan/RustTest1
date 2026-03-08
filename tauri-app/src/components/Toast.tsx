@@ -4,8 +4,11 @@ interface ToastProps {
 
 export function Toast({ message }: ToastProps) {
   return (
-    <div className="fixed bottom-12 left-1/2 -translate-x-1/2 z-50 animate-[toast-in_0.3s_ease-out]">
-      <div className="px-5 py-3 rounded-lg border border-cyber-cyan bg-[#140a23]/90 text-cyber-cyan text-sm shadow-lg">
+    <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50"
+      style={{ animation: "toast-in 0.35s cubic-bezier(0.16, 1, 0.3, 1)" }}
+    >
+      <div className="px-6 py-3 rounded-xl glass-strong border border-cyan-500/20 glow-cyan-soft
+                      text-cyan-300 text-sm font-medium shadow-2xl tracking-wide">
         {message}
       </div>
     </div>

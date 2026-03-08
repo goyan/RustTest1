@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DiskPanel } from "./components/DiskPanel";
 import { FileBrowser } from "./components/FileBrowser";
@@ -12,16 +12,28 @@ function App() {
   const [toast, setToast] = useState<{ message: string; duration: number } | null>(null);
   const [navigationHistory, setNavigationHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const historyIndexRef = useRef(historyIndex);
+  historyIndexRef.current = historyIndex;
+  const toastTimerRef = useRef<number | undefined>(undefined);
 
   const showToast = useCallback((message: string, duration = 2000) => {
+    clearTimeout(toastTimerRef.current);
     setToast({ message, duration });
-    setTimeout(() => setToast(null), duration);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), duration);
+  }, []);
+
+  useEffect(() => {
+    const ref = toastTimerRef;
+    return () => { if (ref.current !== undefined) clearTimeout(ref.current); };
   }, []);
 
   const refreshDisks = useCallback(async () => {
     try {
       const result = await invoke<DiskInfo[]>("list_disks");
-      setDisks(result);
+      setDisks(prev => {
+        if (JSON.stringify(prev) === JSON.stringify(result)) return prev;
+        return result;
+      });
     } catch (err) {
       console.error("Failed to list disks:", err);
     }
@@ -29,7 +41,7 @@ function App() {
 
   useEffect(() => {
     refreshDisks();
-    const interval = setInterval(refreshDisks, 1000);
+    const interval = setInterval(refreshDisks, 10000);
     return () => clearInterval(interval);
   }, [refreshDisks]);
 
@@ -37,7 +49,7 @@ function App() {
     setCurrentPath((prev) => {
       if (prev && prev !== path) {
         setNavigationHistory((h) => {
-          const newHistory = h.slice(0, historyIndex + 1);
+          const newHistory = h.slice(0, historyIndexRef.current + 1);
           newHistory.push(prev);
           setHistoryIndex(newHistory.length - 1);
           return newHistory;
@@ -45,7 +57,7 @@ function App() {
       }
       return path;
     });
-  }, [historyIndex]);
+  }, []);
 
   const navigateBack = useCallback(() => {
     if (historyIndex >= 0) {
@@ -103,20 +115,54 @@ function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [navigateBack, navigateForward, goHome]);
 
+  // Mouse back/forward buttons (Extra1 = button 3, Extra2 = button 4)
+  useEffect(() => {
+    const handleMouseDown = (e: MouseEvent) => {
+      if (e.button === 3) {
+        e.preventDefault();
+        navigateBack();
+      } else if (e.button === 4) {
+        e.preventDefault();
+        navigateForward();
+      }
+    };
+    window.addEventListener("mousedown", handleMouseDown);
+    return () => window.removeEventListener("mousedown", handleMouseDown);
+  }, [navigateBack, navigateForward]);
+
   return (
-    <div className="h-screen flex flex-col bg-[#12101a]">
-      {/* Top bar */}
-      <header className="flex items-center justify-between px-4 py-3 border-b border-cyber-cyan bg-[#0c0a12]">
+    <div className="h-screen flex flex-col bg-[#0a0812] bg-grid-pattern">
+      {/* Header */}
+      <header className="relative flex items-center justify-between px-5 py-3 border-b border-white/[0.06] glass-strong">
+        {/* Gradient line at top */}
+        <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-cyan-400/40 to-transparent" />
+
         <div className="flex items-center gap-4">
-          <h1 className="text-xl font-bold text-cyber-cyan tracking-wider">⚡ DISK DASHBOARD</h1>
-          <span className="text-xs text-cyber-magenta">// SYSTEM ANALYSIS ACTIVE</span>
+          <div className="flex items-center gap-3">
+            {/* Status indicator */}
+            <div className="relative flex items-center justify-center w-8 h-8">
+              <div className="absolute inset-0 rounded-lg bg-cyan-500/10 animate-pulse-glow text-cyan-400" />
+              <span className="relative text-lg">&#x26A1;</span>
+            </div>
+            <h1 className="text-xl font-bold tracking-[0.15em] text-gradient-cyan">
+              DISK DASHBOARD
+            </h1>
+          </div>
+          <div className="hidden sm:flex items-center gap-2 ml-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse-glow text-cyan-400" />
+            <span className="text-[11px] font-medium tracking-wider text-cyber-magenta/70 uppercase">
+              System Analysis Active
+            </span>
+          </div>
         </div>
+
         {currentPath && (
           <button
             onClick={goHome}
-            className="px-3 py-1 text-sm border border-cyber-cyan text-cyber-cyan bg-[#1e1432] hover:bg-[#2a1e46] rounded transition-colors"
+            className="px-4 py-1.5 text-sm font-medium tracking-wider border border-cyan-400/30 text-cyan-300
+                       glass rounded-lg hover:border-cyan-400/60 hover:glow-cyan-soft transition-all duration-200"
           >
-            ⌂ HOME
+            &#x2302; HOME
           </button>
         )}
       </header>
@@ -136,9 +182,14 @@ function App() {
               onToast={showToast}
             />
           ) : (
-            <div className="flex flex-col items-center justify-center h-full">
-              <h2 className="text-2xl text-gray-400 mb-4">Select a disk to browse</h2>
-              <p className="text-sm text-cyber-dim-purple">Click on a disk in the left panel to explore its contents</p>
+            <div className="flex flex-col items-center justify-center h-full animate-fade-in">
+              <div className="glass rounded-2xl p-12 text-center max-w-md">
+                <div className="text-5xl mb-6 opacity-40">&#x1F4BE;</div>
+                <h2 className="text-2xl font-semibold text-gray-300 mb-3 tracking-wide">Select a Disk</h2>
+                <p className="text-sm text-cyber-dim-purple leading-relaxed">
+                  Choose a disk from the left panel to explore its contents and analyze storage usage.
+                </p>
+              </div>
             </div>
           )}
         </main>

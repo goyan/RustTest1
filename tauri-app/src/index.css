@@ -3,10 +3,10 @@
 @tailwind utilities;
 
 :root {
-  --cyber-bg: #12101a;
-  --cyber-panel: #191b23;
-  --cyber-card: #1c1e26;
-  --cyber-card-hover: #262a37;
+  --cyber-bg: #0a0812;
+  --cyber-panel: #110e1a;
+  --cyber-card: #151220;
+  --cyber-card-hover: #1e1a2e;
   --cyber-cyan: #00ffff;
   --cyber-magenta: #ff00ff;
   --cyber-neon-green: #00ff88;
@@ -22,41 +22,236 @@ body {
   margin: 0;
   padding: 0;
   background-color: var(--cyber-bg);
-  color: white;
+  color: #e0dce8;
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   overflow: hidden;
   height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #root {
   height: 100vh;
 }
 
-/* Scrollbar styling */
+/* ========== Custom Scrollbar ========== */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--cyber-bg);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3c2860;
-  border-radius: 4px;
+  background: rgba(120, 100, 150, 0.3);
+  border-radius: 3px;
+  transition: background 0.2s;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--cyber-cyan);
+  background: rgba(0, 255, 255, 0.5);
+  box-shadow: 0 0 6px rgba(0, 255, 255, 0.3);
 }
 
-/* Toast animation */
-@keyframes toast-in {
-  from { opacity: 0; transform: translateY(20px); }
+/* ========== Glass Effect ========== */
+.glass {
+  background: rgba(18, 14, 28, 0.65);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.glass-subtle {
+  background: rgba(18, 14, 28, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.glass-strong {
+  background: rgba(14, 10, 24, 0.8);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ========== Neon Glow Shadows ========== */
+.glow-cyan {
+  box-shadow: 0 0 15px rgba(0, 255, 255, 0.25), 0 0 40px rgba(0, 255, 255, 0.08);
+}
+
+.glow-cyan-soft {
+  box-shadow: 0 0 8px rgba(0, 255, 255, 0.15), 0 0 20px rgba(0, 255, 255, 0.05);
+}
+
+.glow-magenta {
+  box-shadow: 0 0 15px rgba(255, 0, 255, 0.25), 0 0 40px rgba(255, 0, 255, 0.08);
+}
+
+.glow-green {
+  box-shadow: 0 0 12px rgba(0, 255, 136, 0.25);
+}
+
+.glow-red {
+  box-shadow: 0 0 15px rgba(255, 51, 102, 0.3), 0 0 40px rgba(255, 51, 102, 0.1);
+}
+
+.glow-orange {
+  box-shadow: 0 0 12px rgba(255, 136, 0, 0.25);
+}
+
+.glow-purple {
+  box-shadow: 0 0 15px rgba(80, 0, 200, 0.3), 0 0 40px rgba(80, 0, 200, 0.1);
+}
+
+/* ========== Animated Progress Bar ========== */
+@keyframes progress-fill {
+  from { width: 0%; }
+}
+
+.animate-progress {
+  animation: progress-fill 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* ========== Skeleton Loading ========== */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(22, 18, 34, 1) 25%,
+    rgba(40, 32, 58, 1) 50%,
+    rgba(22, 18, 34, 1) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+/* ========== Hover Lift Effect ========== */
+.hover-lift {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-1px) scale(1.005);
+}
+
+/* ========== Fade In Animation ========== */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out forwards;
+}
+
+/* staggered children */
+.animate-fade-in-delay-1 { animation: fade-in 0.3s ease-out 0.05s forwards; opacity: 0; }
+.animate-fade-in-delay-2 { animation: fade-in 0.3s ease-out 0.1s forwards; opacity: 0; }
+.animate-fade-in-delay-3 { animation: fade-in 0.3s ease-out 0.15s forwards; opacity: 0; }
+
+/* ========== Dialog Animations ========== */
+@keyframes dialog-in {
+  from { opacity: 0; transform: scale(0.92) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-dialog-in {
+  animation: dialog-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-backdrop-in {
+  animation: backdrop-in 0.2s ease-out forwards;
+}
+
+/* ========== Pulse Glow for Status ========== */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; box-shadow: 0 0 4px currentColor, 0 0 8px currentColor; }
+  50% { opacity: 0.6; box-shadow: 0 0 8px currentColor, 0 0 20px currentColor; }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* ========== Toast Animations ========== */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(16px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 @keyframes toast-out {
-  from { opacity: 1; transform: translateY(0); }
-  to { opacity: 0; transform: translateY(20px); }
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(16px) scale(0.96); }
+}
+
+/* ========== Gradient Text ========== */
+.text-gradient-cyan {
+  background: linear-gradient(135deg, #00ffff, #00d4ff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.text-gradient-magenta {
+  background: linear-gradient(135deg, #ff00ff, #ff3366);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ========== Neon Border Glow ========== */
+@keyframes border-glow-pulse {
+  0%, 100% { border-color: rgba(0, 255, 255, 0.3); }
+  50% { border-color: rgba(0, 255, 255, 0.6); }
+}
+
+/* ========== Subtle BG Pattern ========== */
+.bg-grid-pattern {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* ========== Focus Ring ========== */
+.focus-glow:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(0, 255, 255, 0.3), 0 0 12px rgba(0, 255, 255, 0.15);
+}
+
+/* ========== Button Base ========== */
+.btn-glass {
+  background: rgba(30, 24, 48, 0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.2s ease;
+}
+
+.btn-glass:hover {
+  background: rgba(40, 32, 64, 0.8);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* ========== Checkbox Styling ========== */
+input[type="checkbox"] {
+  accent-color: #ff00ff;
+  cursor: pointer;
+}
+
+/* ========== Selection ========== */
+::selection {
+  background: rgba(0, 255, 255, 0.2);
+  color: #fff;
 }

@@ -3,7 +3,7 @@ mod analysis;
 mod utils;
 mod commands;
 
-use commands::{disks, files, analysis as cmd_analysis};
+use commands::{disks, files, analysis as cmd_analysis, describe};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -17,6 +17,7 @@ pub fn run() {
             files::open_file,
             files::open_in_explorer,
             cmd_analysis::get_folder_size,
+            describe::describe_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
