@@ -31,6 +31,10 @@ A modern Rust application for real-time disk capacity monitoring and file manage
 - Search/filter files (Ctrl+F)
 - Sortable columns (Name, Size, Category, Usefulness)
 
+<img width="1102" height="732" alt="image" src="https://github.com/user-attachments/assets/44c6801a-cc92-46eb-b474-406c899e1f81" />
+
+<img width="1102" height="732" alt="image" src="https://github.com/user-attachments/assets/a512e3ab-8e48-45bb-9ee1-bc17c21161e5" />
+
 ## Installation
 
 ### Prerequisites
